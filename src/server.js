@@ -115,13 +115,21 @@ mcserver.on('output', (entry) => broadcast({ type: 'output', entry }));
 mcserver.on('status', (status) => broadcast({ type: 'status', status }));
 
 // Push resource stats to all connected clients every 2 seconds.
-setInterval(() => {
+// Disk usage is computed via `df` — cache it so we don't spawn it every tick.
+let diskCache = null;
+let diskCacheAt = 0;
+setInterval(async () => {
   if (wss.clients.size === 0) return;
+  if (Date.now() - diskCacheAt > 8000) {
+    diskCacheAt = Date.now();
+    try { diskCache = await system.diskUsage(config.get().server.directory); } catch (_) {}
+  }
   broadcast({
     type: 'stats',
     system: system.systemInfo(),
     process: system.processStats(mcserver.pid),
     server: mcserver.status(),
+    disk: diskCache,
   });
 }, 2000);
 

@@ -42,7 +42,7 @@ install_base() {
   log "Обновление списков пакетов и установка зависимостей…"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y -qq
-  apt-get install -y -qq curl git tar ufw ca-certificates gnupg screen >/dev/null
+  apt-get install -y -qq curl git tar unzip ufw ca-certificates gnupg screen >/dev/null
 }
 
 install_node() {

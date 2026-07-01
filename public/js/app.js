@@ -523,6 +523,7 @@ function renderDashboard(c) {
       ${statCard('CPU сервера', 'd-cpu', '0<small class="text-sm font-semibold text-base-content/50"> ядр</small>', 'd-cpu-bar')}
       ${statCard('RAM сервера', 'd-mem', '0<small class="text-sm font-semibold text-base-content/50"> МБ</small>', 'd-mem-bar')}
       ${statCard('RAM системы', 'd-sysmem', '0<small class="text-sm font-semibold text-base-content/50">%</small>', 'd-sysmem-bar')}
+      ${statCard('Диск', 'd-disk', '—', 'd-disk-bar')}
     </div>
     <div class="${CARD}"><div class="card-body p-4">
       ${sectionTitle('Консоль сервера', '<button class="btn btn-ghost btn-xs" id="c-clear">Очистить вид</button>')}
@@ -585,11 +586,18 @@ function updateDashStats(msg) {
   setBar('d-cpu-bar', (coresUsed / effCores) * 100, 'd-cpu', `${coresUsed.toFixed(1)}${small(` / ${effCores} ${effCores === 1 ? 'ядро' : 'ядр'}`)}`);
   setBar('d-mem-bar', ((p.memMB || 0) / maxRam) * 100, 'd-mem', `${p.memMB || 0}${small(' МБ')}`);
   setBar('d-sysmem-bar', s.memPercent || 0, 'd-sysmem', `${s.memPercent || 0}${small('%')}`);
+  const disk = msg.disk || State.stats && State.stats.disk;
+  if (disk) {
+    const usedGB = (disk.usedMB / 1024).toFixed(disk.usedMB / 1024 < 10 ? 1 : 0);
+    const totalGB = (disk.totalMB / 1024).toFixed(disk.totalMB / 1024 < 10 ? 1 : 0);
+    setBar('d-disk-bar', disk.percent || 0, 'd-disk', `${usedGB}${small(` / ${totalGB} ГБ`)}`);
+  }
   updateDashStatusCard();
 }
 
 /* ======================= Files ======================= */
-const Files = { cwd: '' };
+const Files = { cwd: '', selected: new Set() };
+const ARCHIVE_RE = /\.(zip|tar\.gz|tgz|tar|tar\.bz2|tbz2|tar\.xz|txz|gz)$/i;
 async function renderFiles(c) {
   c.innerHTML = `
     ${pageHead('Файлы', 'Файловый менеджер — перетащите файлы или папки для загрузки')}
@@ -606,6 +614,13 @@ async function renderFiles(c) {
           <button class="btn btn-sm btn-primary gap-1.5" id="f-upload">${icon('upload')} Файлы</button>
           <input type="file" id="f-file" multiple class="hidden" />
           <input type="file" id="f-filedir" webkitdirectory directory multiple class="hidden" />
+        </div>
+        <div id="f-bulk" class="hidden items-center gap-2 flex-wrap mb-3 p-2 rounded-lg bg-base-200 border border-base-300">
+          <span class="text-sm font-medium px-1" id="f-bulk-count"></span>
+          <div class="flex-1"></div>
+          <button class="btn btn-sm btn-ghost gap-1.5" id="f-bulk-archive">${icon('archive')} Заархивировать</button>
+          <button class="btn btn-sm btn-error gap-1.5" id="f-bulk-delete">${icon('trash')} Удалить</button>
+          <button class="btn btn-sm btn-ghost btn-square" id="f-bulk-clear" title="Снять выделение">${icon('x')}</button>
         </div>
         <div class="breadcrumbs text-sm py-0 mb-2" id="f-crumbs"><ul></ul></div>
         <div class="overflow-x-auto" id="f-list"></div>
@@ -627,8 +642,58 @@ async function renderFiles(c) {
     if (items.length) uploadItems(items);
     e.target.value = '';
   };
+  $('#f-bulk-archive').onclick = archiveSelected;
+  $('#f-bulk-delete').onclick = deleteSelected;
+  $('#f-bulk-clear').onclick = () => { Files.selected.clear(); $$('.f-check').forEach((c) => (c.checked = false)); updateBulkBar(); };
   setupDropzone($('#f-card'));
   loadFiles(Files.cwd);
+}
+
+function updateBulkBar() {
+  const bar = $('#f-bulk');
+  if (!bar) return;
+  const n = Files.selected.size;
+  bar.classList.toggle('hidden', n === 0);
+  bar.classList.toggle('flex', n > 0);
+  const cnt = $('#f-bulk-count');
+  if (cnt) cnt.textContent = `Выбрано: ${n}`;
+  const all = $('#f-selall');
+  if (all) {
+    const total = $$('.f-check').length;
+    all.checked = n > 0 && n === total;
+    all.indeterminate = n > 0 && n < total;
+  }
+}
+async function archiveSelected() {
+  const items = [...Files.selected].map((p) => p.split('/').pop());
+  if (!items.length) return;
+  try {
+    toast('Архивация…', 'info');
+    const r = await API.archive(Files.cwd, items);
+    toast(`Создан архив: ${r.name}`, 'success');
+    Files.selected.clear();
+    loadFiles(Files.cwd);
+  } catch (err) { toastErr(err); }
+}
+async function deleteSelected() {
+  const paths = [...Files.selected];
+  if (!paths.length) return;
+  if (!(await confirmDialog(`Удалить выбранные элементы (${paths.length})? Действие необратимо.`, { danger: true, okText: 'Удалить' }))) return;
+  try {
+    toast('Удаление…', 'info');
+    await Promise.all(paths.map((p) => API.deleteFile(p)));
+    toast('Удалено', 'success');
+  } catch (err) { toastErr(err); }
+  Files.selected.clear();
+  loadFiles(Files.cwd);
+}
+async function extractEntry(path) {
+  try {
+    toast('Распаковка…', 'info');
+    await API.extract(path);
+    toast('Распаковано', 'success');
+    loadFiles(Files.cwd);
+  } catch (err) { toastErr(err); }
 }
 
 function setupDropzone(card) {
@@ -691,10 +756,12 @@ async function uploadItems(items) {
 }
 async function loadFiles(path) {
   try {
+    Files.selected.clear();
     const data = await API.listFiles(path);
     Files.cwd = data.path;
     renderCrumbs(data.path);
     renderFileList(data.entries);
+    updateBulkBar();
   } catch (err) { toastErr(err); }
 }
 function renderCrumbs(path) {
@@ -720,11 +787,14 @@ function renderFileList(entries) {
   const box = $('#f-list');
   if (!entries.length) { box.innerHTML = empty('Папка пуста'); return; }
   box.innerHTML = `<table class="table table-sm">
-    <thead><tr><th>Имя</th><th class="w-24">Размер</th><th class="w-40">Изменён</th><th class="w-10"></th></tr></thead>
+    <thead><tr>
+      <th class="w-8"><input type="checkbox" class="checkbox checkbox-sm align-middle" id="f-selall" title="Выбрать все" /></th>
+      <th>Имя</th><th class="w-24">Размер</th><th class="w-40">Изменён</th><th class="w-10"></th></tr></thead>
     <tbody>${
     entries.map((e) => {
       const ic = e.type === 'dir' ? `<span class="text-warning">${icon('folder')}</span>` : `<span class="text-base-content/40">${icon(e.editable ? 'file' : 'file-plain')}</span>`;
       return `<tr class="hover" data-path="${esc(e.path)}" data-type="${e.type}" data-editable="${e.editable}" data-name="${esc(e.name)}">
+        <td><input type="checkbox" class="checkbox checkbox-sm f-check align-middle" data-path="${esc(e.path)}" /></td>
         <td><div class="flex items-center gap-2.5">${ic}<span class="lnk cursor-pointer hover:text-primary font-medium">${esc(e.name)}</span></div></td>
         <td class="text-base-content/50 whitespace-nowrap">${e.type === 'dir' ? '—' : fmtBytes(e.size)}</td>
         <td class="text-base-content/50 whitespace-nowrap">${e.modified ? fmtDate(e.modified) : '—'}</td>
@@ -735,18 +805,30 @@ function renderFileList(entries) {
   $$('tr[data-path]', box).forEach((tr) => {
     const path = tr.dataset.path, type = tr.dataset.type, name = tr.dataset.name, editable = tr.dataset.editable === 'true';
     $('.lnk', tr).onclick = () => openEntry(type, path, name, editable);
-    tr.ondblclick = (ev) => { if (ev.target.closest('.kebab-btn') || ev.target.closest('.kebab-menu')) return; openEntry(type, path, name, editable); };
+    tr.ondblclick = (ev) => { if (ev.target.closest('.kebab-btn') || ev.target.closest('.kebab-menu') || ev.target.closest('.f-check')) return; openEntry(type, path, name, editable); };
+    const chk = $('.f-check', tr);
+    chk.checked = Files.selected.has(path);
+    chk.onclick = (ev) => ev.stopPropagation();
+    chk.onchange = () => { if (chk.checked) Files.selected.add(path); else Files.selected.delete(path); updateBulkBar(); };
     $('.kebab-btn', tr).onclick = (ev) => {
       ev.stopPropagation();
       const actions = [];
       if (type === 'dir') actions.push({ label: 'Открыть', icon: icon('folder-open'), onClick: () => loadFiles(path) });
       if (editable) actions.push({ label: 'Редактировать', icon: icon('edit'), onClick: () => editFile(path, name) });
+      if (type !== 'dir' && ARCHIVE_RE.test(name)) actions.push({ label: 'Распаковать', icon: icon('archive'), onClick: () => extractEntry(path) });
       actions.push({ label: type === 'dir' ? 'Скачать (.tar.gz)' : 'Скачать', icon: icon('download'), onClick: () => window.open(API.downloadUrl(path)) });
       actions.push({ label: 'Переименовать', icon: icon('edit'), onClick: () => renameEntry(path, name) });
       actions.push({ label: 'Удалить', icon: icon('trash'), danger: true, onClick: () => deleteEntry(path, name) });
       openKebab(ev.currentTarget, actions);
     };
   });
+
+  $('#f-selall', box).onchange = (ev) => {
+    const on = ev.target.checked;
+    $$('.f-check', box).forEach((c) => { c.checked = on; if (on) Files.selected.add(c.dataset.path); else Files.selected.delete(c.dataset.path); });
+    updateBulkBar();
+  };
+  updateBulkBar();
 }
 
 // ---- Kebab dropdown menu (shared) ----
@@ -833,19 +915,35 @@ async function deleteEntry(path, name) {
 
 /* ======================= Backups ======================= */
 async function renderBackups(c) {
+  let data;
+  try { data = await API.backups(); }
+  catch (err) { toastErr(err); c.innerHTML = pageHead('Бэкапы', 'Резервные копии директории сервера') + `<div class="${CARD}"><div class="card-body">${empty('Ошибка загрузки')}</div></div>`; return; }
+  const listInner = data.backups.length
+    ? `<div class="card-body p-4 overflow-x-auto"><table class="table table-sm">
+        <thead><tr><th>Имя</th><th class="w-24">Размер</th><th class="w-40">Создан</th><th class="w-64"></th></tr></thead><tbody>${
+        data.backups.map((b) => `<tr class="hover">
+          <td class="font-mono text-xs">${esc(b.name)}</td>
+          <td class="text-base-content/50 whitespace-nowrap">${fmtBytes(b.size)}</td>
+          <td class="text-base-content/50 whitespace-nowrap">${fmtDate(b.created)}</td>
+          <td class="text-right whitespace-nowrap" data-name="${esc(b.name)}">
+            <button class="btn btn-ghost btn-xs gap-1" data-a="download">${icon('download')} Скачать</button>
+            <button class="btn btn-warning btn-xs gap-1" data-a="restore">${icon('rotate-ccw')} Восстановить</button>
+            <button class="btn btn-error btn-xs" data-a="delete">${icon('trash')}</button>
+          </td></tr>`).join('')
+      }</tbody></table></div>`
+    : `<div class="card-body p-4">${empty('Бэкапов пока нет')}</div>`;
   c.innerHTML = `
     ${pageHead('Бэкапы', 'Резервные копии всей директории сервера (.tar.gz)', `<button class="btn btn-primary btn-sm gap-1.5" id="b-create">${icon('plus')} Создать бэкап</button>`)}
-    <div id="b-list" class="${CARD}"><div class="card-body p-4">${empty('Загрузка…')}</div></div>
+    <div id="b-list" class="${CARD}">${listInner}</div>
     <div class="${CARD} mt-4"><div class="card-body p-5">
       ${sectionTitle('Настройки хранения')}
       <div class="grid gap-4 sm:grid-cols-2">
-        ${field('Хранить последних копий', `<input type="number" id="b-max" min="0" class="${INPUT}" />`, '0 = без ограничения. Старые удаляются автоматически.')}
-        ${field('Исключения (через запятую)', `<input type="text" id="b-exclude" class="${INPUT}" />`, 'Папки/файлы, не попадающие в бэкап.')}
+        ${field('Хранить последних копий', `<input type="number" id="b-max" min="0" class="${INPUT}" value="${data.settings.maxKeep}" />`, '0 = без ограничения. Старые удаляются автоматически.')}
+        ${field('Исключения (через запятую)', `<input type="text" id="b-exclude" class="${INPUT}" value="${esc((data.settings.exclude || []).join(', '))}" />`, 'Папки/файлы, не попадающие в бэкап.')}
       </div>
       <button class="btn btn-primary btn-sm mt-4" id="b-save">Сохранить настройки</button>
     </div></div>`;
   $('#b-create').onclick = createBackup;
-  await loadBackups();
   $('#b-save').onclick = async () => {
     try {
       await API.backupSettings({
@@ -855,37 +953,17 @@ async function renderBackups(c) {
       toast('Настройки сохранены', 'success');
     } catch (err) { toastErr(err); }
   };
-}
-async function loadBackups() {
-  try {
-    const data = await API.backups();
-    $('#b-max').value = data.settings.maxKeep;
-    $('#b-exclude').value = (data.settings.exclude || []).join(', ');
-    const box = $('#b-list');
-    if (!data.backups.length) { box.innerHTML = `<div class="card-body p-4">${empty('Бэкапов пока нет')}</div>`; return; }
-    box.innerHTML = `<div class="card-body p-4 overflow-x-auto"><table class="table table-sm">
-      <thead><tr><th>Имя</th><th class="w-24">Размер</th><th class="w-40">Создан</th><th class="w-64"></th></tr></thead><tbody>${
-      data.backups.map((b) => `<tr class="hover">
-        <td class="font-mono text-xs">${esc(b.name)}</td>
-        <td class="text-base-content/50 whitespace-nowrap">${fmtBytes(b.size)}</td>
-        <td class="text-base-content/50 whitespace-nowrap">${fmtDate(b.created)}</td>
-        <td class="text-right whitespace-nowrap" data-name="${esc(b.name)}">
-          <button class="btn btn-ghost btn-xs gap-1" data-a="download">${icon('download')} Скачать</button>
-          <button class="btn btn-warning btn-xs gap-1" data-a="restore">${icon('rotate-ccw')} Восстановить</button>
-          <button class="btn btn-error btn-xs" data-a="delete">${icon('trash')}</button>
-        </td></tr>`).join('')
-    }</tbody></table></div>`;
-    $$('td[data-name]', box).forEach((td) => {
-      const name = td.dataset.name;
-      $$('[data-a]', td).forEach((btn) => btn.onclick = () => {
-        const a = btn.dataset.a;
-        if (a === 'download') window.open(API.backupDownloadUrl(name));
-        else if (a === 'restore') restoreBackup(name);
-        else if (a === 'delete') deleteBackup(name);
-      });
+  $$('#b-list td[data-name]').forEach((td) => {
+    const name = td.dataset.name;
+    $$('[data-a]', td).forEach((btn) => btn.onclick = () => {
+      const a = btn.dataset.a;
+      if (a === 'download') window.open(API.backupDownloadUrl(name));
+      else if (a === 'restore') restoreBackup(name);
+      else if (a === 'delete') deleteBackup(name);
     });
-  } catch (err) { toastErr(err); }
+  });
 }
+function loadBackups() { return renderBackups($('#content')); }
 async function createBackup() {
   const m = openModal({
     title: 'Создать бэкап',
@@ -916,45 +994,43 @@ async function deleteBackup(name) {
 /* ======================= Timers ======================= */
 const ACTION_LABEL = { restart: 'Перезапуск', stop: 'Остановка', start: 'Запуск', backup: 'Бэкап', command: 'Команда' };
 async function renderTimers(c) {
+  let data;
+  try { data = await API.tasks(); }
+  catch (err) { toastErr(err); c.innerHTML = pageHead('Таймеры', 'Плановые задачи') + `<div class="${CARD}"><div class="card-body">${empty('Ошибка загрузки')}</div></div>`; return; }
+  const listInner = data.tasks.length
+    ? `<div class="card-body p-4 overflow-x-auto"><table class="table table-sm">
+        <thead><tr><th>Задача</th><th>Расписание</th><th>Действие</th><th class="whitespace-nowrap">Следующий запуск</th><th class="w-20"></th></tr></thead><tbody>${
+        data.tasks.map((t) => {
+          const sched = t.type === 'interval' ? `каждые ${t.intervalMinutes} мин` : `ежедневно в ${t.time}`;
+          return `<tr class="hover" data-id="${t.id}">
+            <td><div class="flex items-center gap-2"><b>${esc(t.name)}</b> ${t.enabled ? '<span class="badge badge-success badge-sm">вкл</span>' : '<span class="badge badge-ghost badge-sm">выкл</span>'}</div>
+                ${t.action === 'command' ? `<div class="text-xs text-base-content/40 font-mono">${esc(t.command)}</div>` : ''}</td>
+            <td class="whitespace-nowrap">${sched}</td>
+            <td>${ACTION_LABEL[t.action] || t.action}</td>
+            <td class="text-base-content/50 whitespace-nowrap">${t.enabled ? fmtDate(t.nextRun) : '—'}</td>
+            <td class="text-right whitespace-nowrap">
+              <button class="btn btn-ghost btn-xs" data-a="edit">${icon('edit')}</button>
+              <button class="btn btn-error btn-xs" data-a="del">${icon('trash')}</button>
+            </td></tr>`;
+        }).join('')
+      }</tbody></table></div>`
+    : `<div class="card-body p-4">${empty('Задач пока нет. Добавьте, например, ежедневный рестарт в 05:00.')}</div>`;
   c.innerHTML = `
     ${pageHead('Таймеры', 'Плановые задачи: рестарты, бэкапы, команды по расписанию', `<button class="btn btn-primary btn-sm gap-1.5" id="t-add">${icon('plus')} Новая задача</button>`)}
-    <div id="t-list" class="${CARD}"><div class="card-body p-4">${empty('Загрузка…')}</div></div>`;
+    <div id="t-list" class="${CARD}">${listInner}</div>`;
   $('#t-add').onclick = () => taskDialog(null);
-  await loadTasks();
+  $$('#t-list tr[data-id]').forEach((tr) => {
+    const id = tr.dataset.id;
+    const task = data.tasks.find((x) => x.id === id);
+    $('[data-a="edit"]', tr).onclick = () => taskDialog(task);
+    $('[data-a="del"]', tr).onclick = async () => {
+      if (await confirmDialog(`Удалить задачу «${task.name}»?`, { danger: true, okText: 'Удалить' })) {
+        try { await API.deleteTask(id); loadTasks(); } catch (err) { toastErr(err); }
+      }
+    };
+  });
 }
-async function loadTasks() {
-  try {
-    const data = await API.tasks();
-    const box = $('#t-list');
-    if (!data.tasks.length) { box.innerHTML = `<div class="card-body p-4">${empty('Задач пока нет. Добавьте, например, ежедневный рестарт в 05:00.')}</div>`; return; }
-    box.innerHTML = `<div class="card-body p-4 overflow-x-auto"><table class="table table-sm">
-      <thead><tr><th>Задача</th><th>Расписание</th><th>Действие</th><th class="whitespace-nowrap">Следующий запуск</th><th class="w-20"></th></tr></thead><tbody>${
-      data.tasks.map((t) => {
-        const sched = t.type === 'interval' ? `каждые ${t.intervalMinutes} мин` : `ежедневно в ${t.time}`;
-        return `<tr class="hover" data-id="${t.id}">
-          <td><div class="flex items-center gap-2"><b>${esc(t.name)}</b> ${t.enabled ? '<span class="badge badge-success badge-sm">вкл</span>' : '<span class="badge badge-ghost badge-sm">выкл</span>'}</div>
-              ${t.action === 'command' ? `<div class="text-xs text-base-content/40 font-mono">${esc(t.command)}</div>` : ''}</td>
-          <td class="whitespace-nowrap">${sched}</td>
-          <td>${ACTION_LABEL[t.action] || t.action}</td>
-          <td class="text-base-content/50 whitespace-nowrap">${t.enabled ? fmtDate(t.nextRun) : '—'}</td>
-          <td class="text-right whitespace-nowrap">
-            <button class="btn btn-ghost btn-xs" data-a="edit">${icon('edit')}</button>
-            <button class="btn btn-error btn-xs" data-a="del">${icon('trash')}</button>
-          </td></tr>`;
-      }).join('')
-    }</tbody></table></div>`;
-    $$('tr[data-id]', box).forEach((tr) => {
-      const id = tr.dataset.id;
-      const task = data.tasks.find((x) => x.id === id);
-      $('[data-a="edit"]', tr).onclick = () => taskDialog(task);
-      $('[data-a="del"]', tr).onclick = async () => {
-        if (await confirmDialog(`Удалить задачу «${task.name}»?`, { danger: true, okText: 'Удалить' })) {
-          try { await API.deleteTask(id); loadTasks(); } catch (err) { toastErr(err); }
-        }
-      };
-    });
-  } catch (err) { toastErr(err); }
-}
+function loadTasks() { return renderTimers($('#content')); }
 function taskDialog(task) {
   const t = task || { name: '', enabled: true, type: 'daily', time: '05:00', intervalMinutes: 360, action: 'restart', command: '', warn: 'say Перезапуск сервера через 30 секунд', warnSeconds: 0 };
   const m = openModal({
@@ -1015,7 +1091,7 @@ function taskDialog(task) {
 async function renderDatabases(c) {
   c.innerHTML = pageHead('Базы данных', 'MySQL / MariaDB на этом сервере — создание баз, доступы и SQL-консоль',
     `<button class="btn btn-primary btn-sm gap-1.5 hidden" id="db-create">${icon('plus')} Создать базу</button>`)
-    + `<div id="db-body"><div class="${CARD}"><div class="card-body p-4">${empty('Загрузка…')}</div></div></div>`;
+    + `<div id="db-body"></div>`;
   $('#db-create').onclick = () => dbCreateDialog();
   await loadDatabases();
 }
@@ -1205,7 +1281,6 @@ function toggleRow(label, sub, id, checked) {
 }
 
 async function renderServerSettings(body) {
-  body.innerHTML = `<div class="${CARD}"><div class="card-body">${empty('Загрузка…')}</div></div>`;
   try {
     const data = await API.settings();
     const st = await API.serverStatus();
@@ -1274,7 +1349,6 @@ const COMMON_PROPS = [
   ['enable-command-block', 'Командные блоки'],
 ];
 async function renderProperties(body) {
-  body.innerHTML = `<div class="${CARD}"><div class="card-body">${empty('Загрузка…')}</div></div>`;
   try {
     const data = await API.properties();
     if (!data.exists) {
@@ -1317,7 +1391,6 @@ async function renderProperties(body) {
 }
 
 async function renderFirewall(body) {
-  body.innerHTML = `<div class="${CARD}"><div class="card-body">${empty('Загрузка…')}</div></div>`;
   try {
     const fw = await API.firewall();
     if (!fw.installed) {

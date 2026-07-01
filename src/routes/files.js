@@ -107,4 +107,78 @@ router.get('/download', async (req, res) => {
   }
 });
 
+// Archive selected entries (direct children of `dir`) into a .tar.gz in `dir`.
+router.post('/archive', (req, res) => {
+  try {
+    const { dir, items, name } = req.body || {};
+    const dirAbs = files.resolveSafe(dir || '');
+    if (!fs.existsSync(dirAbs) || !fs.statSync(dirAbs).isDirectory()) {
+      return res.status(400).json({ error: 'Целевая папка не найдена.' });
+    }
+    if (!Array.isArray(items) || !items.length) {
+      return res.status(400).json({ error: 'Не выбраны файлы для архивации.' });
+    }
+    const names = [];
+    for (const it of items) {
+      const base = String(it).split('/').pop();
+      if (!base || base === '.' || base === '..') return res.status(400).json({ error: 'Некорректный элемент.' });
+      files.resolveSafe(path.join(dir || '', base)); // stay inside base dir
+      if (!fs.existsSync(path.join(dirAbs, base))) return res.status(400).json({ error: `Не найден: ${base}` });
+      names.push(base);
+    }
+    const p2 = (n) => String(n).padStart(2, '0');
+    const d = new Date();
+    const ts = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}-${p2(d.getMinutes())}-${p2(d.getSeconds())}`;
+    const safe = (name ? String(name).replace(/[^a-zA-Z0-9_\-.]/g, '') : '') || ('archive_' + ts);
+    const fileName = safe.endsWith('.tar.gz') ? safe : safe + '.tar.gz';
+    const outAbs = files.resolveSafe(path.join(dir || '', fileName));
+    const proc = spawn('tar', ['-czf', outAbs, '-C', dirAbs, ...names]);
+    let stderr = '';
+    proc.stderr.on('data', (d0) => (stderr += d0.toString()));
+    proc.on('error', (err) => { if (!res.headersSent) res.status(500).json({ error: err.message }); });
+    proc.on('exit', (code) => {
+      if (res.headersSent) return;
+      if (code === 0) res.json({ ok: true, name: fileName });
+      else res.status(500).json({ error: 'tar: ' + stderr.slice(0, 300) });
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Extract an archive (.zip/.tar.gz/.tgz/.tar/.tar.bz2/.tar.xz/.gz) into its folder.
+router.post('/extract', async (req, res) => {
+  try {
+    const info = await files.statInfo((req.body || {}).path);
+    if (info.isDir) return res.status(400).json({ error: 'Это папка, а не архив.' });
+    const destDir = path.dirname(info.abs);
+    const lower = info.name.toLowerCase();
+    let cmd;
+    let args;
+    if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) { cmd = 'tar'; args = ['-xzf', info.abs, '-C', destDir]; }
+    else if (lower.endsWith('.tar.bz2') || lower.endsWith('.tbz2')) { cmd = 'tar'; args = ['-xjf', info.abs, '-C', destDir]; }
+    else if (lower.endsWith('.tar.xz') || lower.endsWith('.txz')) { cmd = 'tar'; args = ['-xJf', info.abs, '-C', destDir]; }
+    else if (lower.endsWith('.tar')) { cmd = 'tar'; args = ['-xf', info.abs, '-C', destDir]; }
+    else if (lower.endsWith('.zip')) { cmd = 'unzip'; args = ['-o', info.abs, '-d', destDir]; }
+    else if (lower.endsWith('.gz')) { cmd = 'gunzip'; args = ['-kf', info.abs]; }
+    else return res.status(400).json({ error: 'Неподдерживаемый формат архива.' });
+
+    const proc = spawn(cmd, args);
+    let stderr = '';
+    proc.stderr.on('data', (d0) => (stderr += d0.toString()));
+    proc.on('error', (err) => {
+      if (res.headersSent) return;
+      if (err.code === 'ENOENT') res.status(501).json({ error: `Утилита «${cmd}» не установлена на сервере (apt install ${cmd}).` });
+      else res.status(500).json({ error: err.message });
+    });
+    proc.on('exit', (code) => {
+      if (res.headersSent) return;
+      if (code === 0) res.json({ ok: true });
+      else res.status(500).json({ error: `${cmd} завершился с кодом ${code}: ${stderr.slice(0, 300)}` });
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

@@ -53,6 +53,8 @@ const API = (() => {
     renameFile: (path, newName) => post('/api/files/rename', { path, newName }),
     upload: (path, formData) => { formData.append('path', path); return req('POST', '/api/files/upload', formData); },
     downloadUrl: (path) => '/api/files/download?path=' + encodeURIComponent(path),
+    archive: (dir, items, name) => post('/api/files/archive', { dir, items, name }),
+    extract: (path) => post('/api/files/extract', { path }),
     // backups
     backups: () => get('/api/backups'),
     createBackup: (label) => post('/api/backups/create', { label }),
