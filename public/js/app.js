@@ -279,7 +279,7 @@ function renderDashboard(c) {
     <div class="page-head"><div><h1>Панель</h1><p>Состояние сервера и живая консоль</p></div></div>
     <div class="grid grid-stats" style="margin-bottom:16px">
       <div class="card"><div class="stat"><div class="stat-label">Статус</div><div class="stat-value" id="d-status">—</div><div class="dim" id="d-status-sub"></div></div></div>
-      <div class="card"><div class="stat"><div class="stat-label">CPU сервера</div><div class="stat-value" id="d-cpu">0<small>%</small></div><div class="bar" id="d-cpu-bar"><span style="width:0"></span></div></div></div>
+      <div class="card"><div class="stat"><div class="stat-label">CPU сервера</div><div class="stat-value" id="d-cpu">0<small> ядр</small></div><div class="bar" id="d-cpu-bar"><span style="width:0"></span></div></div></div>
       <div class="card"><div class="stat"><div class="stat-label">RAM сервера</div><div class="stat-value" id="d-mem">0<small> МБ</small></div><div class="bar" id="d-mem-bar"><span style="width:0"></span></div></div></div>
       <div class="card"><div class="stat"><div class="stat-label">RAM системы</div><div class="stat-value" id="d-sysmem">0<small>%</small></div><div class="bar" id="d-sysmem-bar"><span style="width:0"></span></div></div></div>
     </div>
@@ -335,8 +335,12 @@ function setBar(id, pct, valId, valText) {
 function updateDashStats(msg) {
   const p = msg.process || {};
   const s = msg.system || {};
+  const sv = msg.server || State.status || {};
   const maxRam = (State.settings && State.settings.server && State.settings.server.maxRamMB) || s.memTotalMB || 1;
-  setBar('d-cpu-bar', p.cpu || 0, 'd-cpu', `${(p.cpu || 0).toFixed(0)}<small>%</small>`);
+  // Effective allocated cores: cpuCores limit if set, else all host cores.
+  const effCores = (sv.cpuCores && sv.cpuCores > 0) ? sv.cpuCores : (sv.totalCores || s.cpuCount || 1);
+  const coresUsed = (p.cpu || 0) / 100; // p.cpu is % of a single core
+  setBar('d-cpu-bar', (coresUsed / effCores) * 100, 'd-cpu', `${coresUsed.toFixed(1)}<small> / ${effCores} ${effCores === 1 ? 'ядро' : 'ядр'}</small>`);
   setBar('d-mem-bar', ((p.memMB || 0) / maxRam) * 100, 'd-mem', `${p.memMB || 0}<small> МБ</small>`);
   setBar('d-sysmem-bar', s.memPercent || 0, 'd-sysmem', `${s.memPercent || 0}<small>%</small>`);
   updateDashStatusCard();
@@ -473,7 +477,14 @@ function renderCrumbs(path) {
   box.innerHTML = html;
   $$('a', box).forEach((a) => (a.onclick = () => loadFiles(a.dataset.p)));
 }
+function openEntry(type, path, name, editable) {
+  if (type === 'dir') loadFiles(path);
+  else if (editable) editFile(path, name);
+  else window.open(API.downloadUrl(path));
+}
+
 function renderFileList(entries) {
+  closeKebab(); // drop any open menu when the list re-renders (navigation/refresh)
   const box = $('#f-list');
   if (!entries.length) { box.innerHTML = `<div class="empty">Папка пуста</div>`; return; }
   box.innerHTML = `<table class="table"><thead><tr><th>Имя</th><th class="nowrap">Размер</th><th class="nowrap">Изменён</th><th></th></tr></thead><tbody>${
@@ -483,29 +494,60 @@ function renderFileList(entries) {
         <td><div class="fname">${icon}<span class="lnk" style="cursor:pointer">${esc(e.name)}</span></div></td>
         <td class="dim nowrap">${e.type === 'dir' ? '—' : fmtBytes(e.size)}</td>
         <td class="dim nowrap">${e.modified ? fmtDate(e.modified) : '—'}</td>
-        <td class="actions">
-          ${e.editable ? '<button class="btn btn-sm" data-a="edit">✎</button>' : ''}
-          <button class="btn btn-sm" data-a="download">⭳</button>
-          <button class="btn btn-sm" data-a="rename">✏</button>
-          <button class="btn btn-sm btn-danger" data-a="delete">🗑</button>
-        </td></tr>`;
+        <td class="actions"><button class="kebab-btn" title="Действия">⋮</button></td></tr>`;
     }).join('')
   }</tbody></table>`;
 
   $$('tr[data-path]', box).forEach((tr) => {
     const path = tr.dataset.path, type = tr.dataset.type, name = tr.dataset.name, editable = tr.dataset.editable === 'true';
-    $('.lnk', tr).onclick = () => { if (type === 'dir') loadFiles(path); else if (editable) editFile(path, name); else window.open(API.downloadUrl(path)); };
-    $$('[data-a]', tr).forEach((btn) => {
-      btn.onclick = (ev) => {
-        ev.stopPropagation();
-        const a = btn.dataset.a;
-        if (a === 'edit') editFile(path, name);
-        else if (a === 'download') window.open(API.downloadUrl(path));
-        else if (a === 'rename') renameEntry(path, name);
-        else if (a === 'delete') deleteEntry(path, name);
-      };
-    });
+    // Single click on the name, or double click on the row, opens the entry
+    // (folders navigate in, editable files open in the editor). Pterodactyl-style.
+    $('.lnk', tr).onclick = () => openEntry(type, path, name, editable);
+    tr.ondblclick = (ev) => { if (ev.target.closest('.kebab-btn') || ev.target.closest('.kebab-menu')) return; openEntry(type, path, name, editable); };
+    // Kebab (⋮) actions menu on the right.
+    $('.kebab-btn', tr).onclick = (ev) => {
+      ev.stopPropagation();
+      const actions = [];
+      if (type === 'dir') actions.push({ label: 'Открыть', icon: '🗀', onClick: () => loadFiles(path) });
+      if (editable) actions.push({ label: 'Редактировать', icon: '✎', onClick: () => editFile(path, name) });
+      actions.push({ label: type === 'dir' ? 'Скачать (.tar.gz)' : 'Скачать', icon: '⭳', onClick: () => window.open(API.downloadUrl(path)) });
+      actions.push({ label: 'Переименовать', icon: '✏', onClick: () => renameEntry(path, name) });
+      actions.push({ label: 'Удалить', icon: '🗑', danger: true, onClick: () => deleteEntry(path, name) });
+      openKebab(ev.currentTarget, actions);
+    };
   });
+}
+
+// ---- Kebab dropdown menu (shared) ----
+let _kebabEl = null;
+function closeKebab() {
+  if (_kebabEl) { _kebabEl.remove(); _kebabEl = null; }
+  document.removeEventListener('mousedown', kebabOutside, true);
+  window.removeEventListener('scroll', closeKebab, true);
+}
+function kebabOutside(e) { if (_kebabEl && !_kebabEl.contains(e.target)) closeKebab(); }
+function openKebab(anchor, actions) {
+  closeKebab();
+  const menu = document.createElement('div');
+  menu.className = 'kebab-menu';
+  menu.innerHTML = actions.map((a, i) =>
+    `<button class="kebab-item ${a.danger ? 'danger' : ''}" data-i="${i}"><span class="ki">${a.icon || ''}</span>${esc(a.label)}</button>`
+  ).join('');
+  document.body.appendChild(menu);
+  _kebabEl = menu;
+  const r = anchor.getBoundingClientRect();
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  let top = r.bottom + 4;
+  if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 4);
+  menu.style.top = top + 'px';
+  menu.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.right - mw)) + 'px';
+  actions.forEach((a, i) => {
+    menu.querySelector(`[data-i="${i}"]`).onclick = () => { closeKebab(); a.onClick(); };
+  });
+  setTimeout(() => {
+    document.addEventListener('mousedown', kebabOutside, true);
+    window.addEventListener('scroll', closeKebab, true);
+  }, 0);
 }
 async function editFile(path, name) {
   try {
@@ -778,6 +820,10 @@ async function renderServerSettings(body) {
     const st = await API.serverStatus();
     State.settings = data;
     const s = data.server;
+    const totalCores = data.cpuCount || 1;
+    const coreWord = (i) => (i === 1 ? 'ядро' : i >= 2 && i <= 4 ? 'ядра' : 'ядер');
+    let cpuOpts = `<option value="0" ${!s.cpuCores ? 'selected' : ''}>Все ядра — без ограничения</option>`;
+    for (let i = 1; i <= totalCores; i++) cpuOpts += `<option value="${i}" ${s.cpuCores === i ? 'selected' : ''}>${i} ${coreWord(i)} (${i} vCPU)</option>`;
     body.innerHTML = `
       <div class="card">
         <h3>Запуск и ресурсы</h3>
@@ -788,6 +834,13 @@ async function renderServerSettings(body) {
         <div class="field-row">
           <div class="field"><label>Мин. ОЗУ (МБ)</label><input id="s-minram" type="number" min="128" step="128" value="${s.minRamMB}" /><div class="hint">≈ ${(s.minRamMB/1024).toFixed(1)} ГБ</div></div>
           <div class="field"><label>Макс. ОЗУ (МБ)</label><input id="s-maxram" type="number" min="256" step="128" value="${s.maxRamMB}" /><div class="hint">≈ ${(s.maxRamMB/1024).toFixed(1)} ГБ</div></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Ограничение CPU (сколько vCPU выделить)</label>
+            <select id="s-cpucores">${cpuOpts}</select>
+            <div class="hint">${data.hasTaskset ? `Доступно ядер на сервере: ${totalCores}. Привязка к ядрам через taskset.` : '⚠ taskset недоступен на этой системе — ограничение CPU не применится.'}</div>
+          </div>
+          <div class="field"><label>&nbsp;</label><div class="dim" style="padding-top:9px;line-height:1.5">Сервер будет использовать не больше выбранного числа ядер. Требует перезапуска сервера.</div></div>
         </div>
         <div class="field-row">
           <div class="field"><label>Путь к Java</label><input id="s-java" value="${esc(s.javaPath)}" /></div>
@@ -810,7 +863,7 @@ async function renderServerSettings(body) {
     $('#s-save').onclick = async () => {
       const payload = {
         directory: $('#s-dir').value, jar: $('#s-jar').value, javaPath: $('#s-java').value,
-        minRamMB: $('#s-minram').value, maxRamMB: $('#s-maxram').value,
+        minRamMB: $('#s-minram').value, maxRamMB: $('#s-maxram').value, cpuCores: $('#s-cpucores').value,
         stopCommand: $('#s-stopcmd').value, jvmFlags: $('#s-flags').value, customCommand: $('#s-custom').value,
         useAikarFlags: $('#s-aikar').checked, autoStart: $('#s-autostart').checked, autoRestart: $('#s-autorestart').checked,
       };

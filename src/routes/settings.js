@@ -2,6 +2,7 @@
 
 const express = require('express');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const config = require('../config');
 const mcserver = require('../mcserver');
@@ -18,6 +19,8 @@ function publicConfig() {
     panel: { host: c.panel.host, port: c.panel.port },
     backups: { maxKeep: c.backups.maxKeep, exclude: c.backups.exclude, directory: c.backups.directory },
     aikarFlags: config.AIKAR_FLAGS.join(' '),
+    cpuCount: os.cpus().length,
+    hasTaskset: mcserver.HAS_TASKSET,
   };
 }
 
@@ -32,6 +35,10 @@ router.post('/server', (req, res) => {
   let max = b.maxRamMB != null ? Math.max(256, parseInt(b.maxRamMB, 10) || cur.maxRamMB) : cur.maxRamMB;
   if (max < min) max = min;
 
+  const cpuCores = b.cpuCores != null
+    ? Math.max(0, Math.min(os.cpus().length, parseInt(b.cpuCores, 10) || 0))
+    : cur.cpuCores;
+
   const patch = {
     server: {
       directory: typeof b.directory === 'string' && b.directory.trim() ? b.directory.trim() : cur.directory,
@@ -39,6 +46,7 @@ router.post('/server', (req, res) => {
       javaPath: typeof b.javaPath === 'string' && b.javaPath.trim() ? b.javaPath.trim() : cur.javaPath,
       minRamMB: min,
       maxRamMB: max,
+      cpuCores,
       jvmFlags: typeof b.jvmFlags === 'string' ? b.jvmFlags : cur.jvmFlags,
       useAikarFlags: b.useAikarFlags != null ? !!b.useAikarFlags : cur.useAikarFlags,
       customCommand: typeof b.customCommand === 'string' ? b.customCommand : cur.customCommand,

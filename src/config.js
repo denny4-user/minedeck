@@ -49,6 +49,7 @@ function defaultConfig() {
       javaPath: 'java',
       minRamMB: 1024,
       maxRamMB: 2048,
+      cpuCores: 0,
       jvmFlags: '',
       useAikarFlags: false,
       customCommand: '',

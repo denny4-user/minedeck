@@ -1,12 +1,34 @@
 'use strict';
 
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
+const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
 const config = require('./config');
 
 const HISTORY_LIMIT = 400;
+
+// Is `taskset` (util-linux) available for CPU-affinity based core limiting?
+const HAS_TASKSET = (() => {
+  try {
+    execFileSync('sh', ['-c', 'command -v taskset'], { stdio: 'ignore' });
+    return true;
+  } catch (_) {
+    return false;
+  }
+})();
+
+// Wrap a command so the process (and its children) are pinned to `cores` CPUs
+// via taskset. Affinity is inherited by children, so it works for both the
+// direct java launch and a custom shell command. cores<=0 means unlimited.
+function cpuAffinityWrap(cmd, args, cores, totalCores, hasTaskset) {
+  let n = parseInt(cores, 10) || 0;
+  if (!hasTaskset || n <= 0) return { cmd, args };
+  if (n > totalCores) n = totalCores;
+  const range = n === 1 ? '0' : `0-${n - 1}`;
+  return { cmd: 'taskset', args: ['-c', range, cmd, ...args] };
+}
 
 class MCServer extends EventEmitter {
   constructor() {
@@ -32,6 +54,8 @@ class MCServer extends EventEmitter {
       pid: this.pid,
       startedAt: this.startedAt,
       command: this.describeCommand(),
+      cpuCores: parseInt(config.get().server.cpuCores, 10) || 0,
+      totalCores: os.cpus().length,
     };
   }
 
@@ -54,23 +78,38 @@ class MCServer extends EventEmitter {
 
   buildCommand() {
     const s = config.get().server;
+    let cmd;
+    let args;
+    let custom;
     if (s.customCommand && s.customCommand.trim()) {
-      return { cmd: 'sh', args: ['-c', s.customCommand], custom: true };
+      cmd = 'sh';
+      args = ['-c', s.customCommand];
+      custom = true;
+    } else {
+      args = [];
+      args.push(`-Xms${Math.max(128, parseInt(s.minRamMB, 10) || 1024)}M`);
+      args.push(`-Xmx${Math.max(256, parseInt(s.maxRamMB, 10) || 2048)}M`);
+      if (s.useAikarFlags) args.push(...config.AIKAR_FLAGS);
+      if (s.jvmFlags && s.jvmFlags.trim()) {
+        args.push(...s.jvmFlags.trim().split(/\s+/).filter(Boolean));
+      }
+      args.push('-jar', s.jar || 'server.jar', 'nogui');
+      cmd = s.javaPath || 'java';
+      custom = false;
     }
-    const args = [];
-    args.push(`-Xms${Math.max(128, parseInt(s.minRamMB, 10) || 1024)}M`);
-    args.push(`-Xmx${Math.max(256, parseInt(s.maxRamMB, 10) || 2048)}M`);
-    if (s.useAikarFlags) args.push(...config.AIKAR_FLAGS);
-    if (s.jvmFlags && s.jvmFlags.trim()) {
-      args.push(...s.jvmFlags.trim().split(/\s+/).filter(Boolean));
-    }
-    args.push('-jar', s.jar || 'server.jar', 'nogui');
-    return { cmd: s.javaPath || 'java', args, custom: false };
+    // Limit the server to N CPU cores (allocate N vCPU) via taskset affinity.
+    const wrapped = cpuAffinityWrap(cmd, args, s.cpuCores, os.cpus().length, HAS_TASKSET);
+    return { cmd: wrapped.cmd, args: wrapped.args, custom };
   }
 
   describeCommand() {
+    const s = config.get().server;
     const { cmd, args, custom } = this.buildCommand();
-    if (custom) return config.get().server.customCommand;
+    if (custom) {
+      // When taskset-wrapped, args = ['-c', RANGE, 'sh', '-c', <customCommand>].
+      if (cmd === 'taskset') return `taskset -c ${args[1]} ${s.customCommand}`;
+      return s.customCommand;
+    }
     return `${cmd} ${args.join(' ')}`;
   }
 
@@ -237,3 +276,5 @@ class MCServer extends EventEmitter {
 }
 
 module.exports = new MCServer();
+module.exports.cpuAffinityWrap = cpuAffinityWrap;
+module.exports.HAS_TASKSET = HAS_TASKSET;
