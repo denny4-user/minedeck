@@ -604,24 +604,26 @@ async function renderFiles(c) {
     <div class="${CARD} relative drop-target select-none" id="f-card">
       <div class="dropzone-hint" id="f-drop-hint">${icon('upload')} Отпустите, чтобы загрузить в текущую папку</div>
       <div class="card-body p-4">
-        <div class="flex items-center gap-2 flex-wrap mb-3">
-          <button class="btn btn-sm btn-ghost gap-1.5" id="f-up">${icon('up')} Вверх</button>
-          <button class="btn btn-sm btn-ghost gap-1.5" id="f-refresh">${icon('refresh')} Обновить</button>
-          <div class="flex-1"></div>
-          <button class="btn btn-sm btn-ghost gap-1.5" id="f-newfile">${icon('file-plus')} Файл</button>
-          <button class="btn btn-sm btn-ghost gap-1.5" id="f-newdir">${icon('folder-plus')} Папка</button>
-          <button class="btn btn-sm gap-1.5" id="f-uploaddir">${icon('upload')} Папка</button>
-          <button class="btn btn-sm btn-primary gap-1.5" id="f-upload">${icon('upload')} Файлы</button>
-          <div id="f-progress" class="radial-progress text-primary hidden shrink-0 text-[10px] font-semibold" style="--size:2.2rem;--thickness:3px;--value:0;" role="progressbar" title="Загрузка">0%</div>
-          <input type="file" id="f-file" multiple class="hidden" />
-          <input type="file" id="f-filedir" webkitdirectory directory multiple class="hidden" />
-        </div>
-        <div id="f-bulk" class="hidden items-center gap-2 flex-wrap mb-3 p-2 rounded-lg bg-base-200 border border-base-300">
-          <span class="text-sm font-medium px-1" id="f-bulk-count"></span>
-          <div class="flex-1"></div>
-          <button class="btn btn-sm btn-ghost gap-1.5" id="f-bulk-archive">${icon('archive')} Заархивировать</button>
-          <button class="btn btn-sm btn-error gap-1.5" id="f-bulk-delete">${icon('trash')} Удалить</button>
-          <button class="btn btn-sm btn-ghost btn-square" id="f-bulk-clear" title="Снять выделение">${icon('x')}</button>
+        <div class="relative mb-3">
+          <div class="flex items-center gap-2 flex-wrap">
+            <button class="btn btn-sm btn-ghost gap-1.5" id="f-up">${icon('up')} Вверх</button>
+            <button class="btn btn-sm btn-ghost gap-1.5" id="f-refresh">${icon('refresh')} Обновить</button>
+            <div class="flex-1"></div>
+            <button class="btn btn-sm btn-ghost gap-1.5" id="f-newfile">${icon('file-plus')} Файл</button>
+            <button class="btn btn-sm btn-ghost gap-1.5" id="f-newdir">${icon('folder-plus')} Папка</button>
+            <button class="btn btn-sm gap-1.5" id="f-uploaddir">${icon('upload')} Папка</button>
+            <button class="btn btn-sm btn-primary gap-1.5" id="f-upload">${icon('upload')} Файлы</button>
+            <div id="f-progress" class="radial-progress text-primary hidden shrink-0 text-[10px] font-semibold" style="--size:2.2rem;--thickness:3px;--value:0;" role="progressbar" title="Загрузка">0%</div>
+            <input type="file" id="f-file" multiple class="hidden" />
+            <input type="file" id="f-filedir" webkitdirectory directory multiple class="hidden" />
+          </div>
+          <div id="f-bulk" class="hidden absolute inset-0 items-center gap-2 rounded-lg bg-base-200 border border-base-300 px-3">
+            <span class="text-sm font-medium px-1" id="f-bulk-count"></span>
+            <div class="flex-1"></div>
+            <button class="btn btn-sm btn-ghost gap-1.5" id="f-bulk-archive">${icon('archive')} Заархивировать</button>
+            <button class="btn btn-sm btn-error gap-1.5" id="f-bulk-delete">${icon('trash')} Удалить</button>
+            <button class="btn btn-sm btn-ghost btn-square" id="f-bulk-clear" title="Снять выделение">${icon('x')}</button>
+          </div>
         </div>
         <div class="breadcrumbs text-sm py-0 mb-2" id="f-crumbs"><ul></ul></div>
         <div class="overflow-x-auto" id="f-list"></div>
