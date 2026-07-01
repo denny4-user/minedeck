@@ -108,6 +108,40 @@ function openModal({ title, body, footer, wide }) {
   return { root, close };
 }
 
+// Rich confirmation for server power actions (stop/restart/kill).
+function confirmAction({ icon: ic, tone = 'warning', title, description, warning, okText }) {
+  return new Promise((resolve) => {
+    const tones = {
+      warning: { ring: 'bg-warning/15 text-warning', btn: 'btn-warning' },
+      error: { ring: 'bg-error/15 text-error', btn: 'btn-error' },
+      primary: { ring: 'bg-primary/15 text-primary', btn: 'btn-primary' },
+    };
+    const t = tones[tone] || tones.warning;
+    const root = $('#modal-root');
+    root.innerHTML = `
+      <div class="modal modal-open" id="md-overlay">
+        <div class="modal-box max-w-md border border-base-300 text-center">
+          <div class="mx-auto mb-4 w-14 h-14 rounded-full flex items-center justify-center ${t.ring}">${icon(ic, 'w-7 h-7')}</div>
+          <h3 class="text-lg font-bold mb-1.5">${esc(title)}</h3>
+          <p class="text-sm text-base-content/60 leading-relaxed">${esc(description)}</p>
+          ${warning ? `<div class="mt-3 rounded-lg bg-error/10 border border-error/30 text-error text-sm py-2 px-3 text-left flex gap-2 items-start">${icon('zap', 'w-4 h-4 mt-0.5 shrink-0')}<span>${esc(warning)}</span></div>` : ''}
+          <div class="flex gap-2 mt-6">
+            <button class="btn btn-ghost flex-1" data-c>Отмена</button>
+            <button class="btn ${t.btn} flex-1 gap-1.5" data-ok>${icon(ic, 'w-4 h-4')} ${esc(okText)}</button>
+          </div>
+        </div>
+      </div>`;
+    const overlay = $('#md-overlay', root);
+    const done = (val) => { root.innerHTML = ''; document.removeEventListener('keydown', onKey, true); resolve(val); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); done(false); } else if (e.key === 'Enter') { e.preventDefault(); done(true); } };
+    $('[data-ok]', root).onclick = () => done(true);
+    $('[data-c]', root).onclick = () => done(false);
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(false); });
+    document.addEventListener('keydown', onKey, true);
+    const ok = $('[data-ok]', root); if (ok) ok.focus();
+  });
+}
+
 function confirmDialog(message, { danger, okText } = {}) {
   return new Promise((resolve) => {
     const m = openModal({
@@ -424,9 +458,22 @@ function pushHistory(cmd) {
 /* ======================= Topbar controls ======================= */
 function bindTopbar() {
   $('#btn-start').onclick = () => serverAction('start');
-  $('#btn-restart').onclick = async () => { if (await confirmDialog('Перезапустить сервер?')) serverAction('restart'); };
-  $('#btn-stop').onclick = async () => { if (await confirmDialog('Остановить сервер?')) serverAction('stop'); };
-  $('#btn-kill').onclick = async () => { if (await confirmDialog('Принудительно завершить процесс (SIGKILL)? Возможна потеря данных.', { danger: true, okText: 'Завершить' })) serverAction('kill'); };
+  $('#btn-restart').onclick = async () => {
+    if (await confirmAction({ icon: 'restart', tone: 'warning', title: 'Перезапустить сервер?',
+      description: 'Сервер корректно сохранится, выключится и запустится заново. Игроки будут отключены на время перезапуска.',
+      okText: 'Перезапустить' })) serverAction('restart');
+  };
+  $('#btn-stop').onclick = async () => {
+    if (await confirmAction({ icon: 'stop', tone: 'error', title: 'Остановить сервер?',
+      description: 'Мир сохранится, сервер корректно выключится. Все игроки будут отключены.',
+      okText: 'Остановить' })) serverAction('stop');
+  };
+  $('#btn-kill').onclick = async () => {
+    if (await confirmAction({ icon: 'zap', tone: 'error', title: 'Принудительно завершить?',
+      description: 'Процесс сервера будет убит немедленно (SIGKILL), без корректного сохранения.',
+      warning: 'Возможна потеря данных и повреждение мира. Используйте только если сервер завис и не реагирует на «Стоп».',
+      okText: 'Завершить' })) serverAction('kill');
+  };
 }
 async function serverAction(action) {
   try { await API.serverAction(action); }

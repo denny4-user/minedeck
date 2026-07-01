@@ -1,6 +1,6 @@
 {
   "name": "minedeck",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "MineDeck — a lightweight, single-server web control panel for a Minecraft server. Console, file manager, backups, timers, RAM/port/firewall settings.",
   "main": "src/server.js",
   "type": "commonjs",
