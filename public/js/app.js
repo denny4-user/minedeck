@@ -141,6 +141,10 @@ function enterApp() {
   State.authed = true;
   $('#auth-screen').classList.add('hidden');
   $('#app-shell').classList.remove('hidden');
+  // Prevent the browser from opening files dropped outside the dropzone.
+  ['dragover', 'drop'].forEach((ev) =>
+    window.addEventListener(ev, (e) => { e.preventDefault(); }, false)
+  );
   connectWS();
   bindTopbar();
   window.addEventListener('hashchange', router);
@@ -342,16 +346,19 @@ function updateDashStats(msg) {
 const Files = { cwd: '' };
 async function renderFiles(c) {
   c.innerHTML = `
-    <div class="page-head"><div><h1>Файлы</h1><p>Файловый менеджер директории сервера</p></div></div>
-    <div class="card">
+    <div class="page-head"><div><h1>Файлы</h1><p>Файловый менеджер директории сервера — перетащите файлы или папки для загрузки</p></div></div>
+    <div class="card" id="f-card">
+      <div class="dropzone-hint" id="f-drop-hint">⭱ Отпустите, чтобы загрузить в текущую папку</div>
       <div class="toolbar">
         <button class="btn btn-sm" id="f-up">↑ Вверх</button>
         <button class="btn btn-sm" id="f-refresh">⟳ Обновить</button>
         <div class="spacer"></div>
         <button class="btn btn-sm" id="f-newfile">＋ Файл</button>
         <button class="btn btn-sm" id="f-newdir">＋ Папка</button>
-        <button class="btn btn-sm btn-primary" id="f-upload">⭱ Загрузить</button>
+        <button class="btn btn-sm" id="f-uploaddir">⭱ Папка</button>
+        <button class="btn btn-sm btn-primary" id="f-upload">⭱ Файлы</button>
         <input type="file" id="f-file" multiple class="hidden" />
+        <input type="file" id="f-filedir" webkitdirectory directory multiple class="hidden" />
       </div>
       <div class="breadcrumb" id="f-crumbs"></div>
       <div id="f-list"></div>
@@ -361,8 +368,90 @@ async function renderFiles(c) {
   $('#f-newfile').onclick = () => newEntry(false);
   $('#f-newdir').onclick = () => newEntry(true);
   $('#f-upload').onclick = () => $('#f-file').click();
-  $('#f-file').onchange = uploadFiles;
+  $('#f-uploaddir').onclick = () => $('#f-filedir').click();
+  $('#f-file').onchange = (e) => {
+    const items = Array.from(e.target.files).map((f) => ({ file: f, path: f.name }));
+    if (items.length) uploadItems(items);
+    e.target.value = '';
+  };
+  $('#f-filedir').onchange = (e) => {
+    // webkitRelativePath keeps folder structure (e.g. "world/region/r.0.0.mca").
+    const items = Array.from(e.target.files).map((f) => ({ file: f, path: f.webkitRelativePath || f.name }));
+    if (items.length) uploadItems(items);
+    e.target.value = '';
+  };
+  setupDropzone($('#f-card'));
   loadFiles(Files.cwd);
+}
+
+// Drag-and-drop upload (files and whole folders).
+function setupDropzone(card) {
+  let depth = 0;
+  const on = (name, fn) => card.addEventListener(name, fn);
+  on('dragenter', (e) => { e.preventDefault(); depth++; card.classList.add('dragover'); });
+  on('dragover', (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; });
+  on('dragleave', (e) => { e.preventDefault(); depth = Math.max(0, depth - 1); if (depth === 0) card.classList.remove('dragover'); });
+  on('drop', async (e) => {
+    e.preventDefault();
+    depth = 0; card.classList.remove('dragover');
+    const dt = e.dataTransfer;
+    const collected = [];
+    const items = dt && dt.items ? Array.from(dt.items) : [];
+    // webkitGetAsEntry must be read synchronously during the drop event.
+    const entries = [];
+    if (items.length && items[0].webkitGetAsEntry) {
+      for (const it of items) { const en = it.webkitGetAsEntry && it.webkitGetAsEntry(); if (en) entries.push(en); }
+    }
+    if (entries.length) {
+      for (const en of entries) await walkEntry(en, '', collected);
+    } else if (dt && dt.files) {
+      for (const f of dt.files) collected.push({ file: f, path: f.name });
+    }
+    if (collected.length) uploadItems(collected);
+    else toast('Не удалось прочитать перетащенные файлы', 'error');
+  });
+}
+
+// Recursively read a dropped FileSystemEntry into {file, path} items.
+function walkEntry(entry, prefix, out) {
+  return new Promise((resolve) => {
+    if (!entry) return resolve();
+    if (entry.isFile) {
+      entry.file(
+        (f) => { out.push({ file: f, path: prefix + entry.name }); resolve(); },
+        () => resolve()
+      );
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const acc = [];
+      const readBatch = () => reader.readEntries(async (batch) => {
+        if (!batch.length) {
+          for (const child of acc) await walkEntry(child, prefix + entry.name + '/', out);
+          resolve();
+        } else {
+          acc.push(...batch);
+          readBatch();
+        }
+      }, () => resolve());
+      readBatch();
+    } else {
+      resolve();
+    }
+  });
+}
+
+async function uploadItems(items) {
+  const fd = new FormData();
+  const relpaths = [];
+  for (const it of items) { fd.append('files', it.file, it.file.name); relpaths.push(it.path); }
+  fd.append('relpaths', JSON.stringify(relpaths));
+  const label = items.length === 1 ? items[0].path : `${items.length} файл(ов)`;
+  try {
+    toast(`Загрузка: ${label}…`, 'info');
+    const r = await API.upload(Files.cwd, fd);
+    toast(`Загружено: ${r.count != null ? r.count : (r.saved || []).length}`, 'success');
+    loadFiles(Files.cwd);
+  } catch (err) { toastErr(err); }
 }
 async function loadFiles(path) {
   try {
@@ -470,16 +559,6 @@ async function deleteEntry(path, name) {
   try { await API.deleteFile(path); loadFiles(Files.cwd); toast('Удалено', 'success'); }
   catch (err) { toastErr(err); }
 }
-async function uploadFiles(e) {
-  const files = e.target.files;
-  if (!files || !files.length) return;
-  const fd = new FormData();
-  for (const f of files) fd.append('files', f);
-  try { toast('Загрузка…', 'info'); await API.upload(Files.cwd, fd); toast('Загружено', 'success'); loadFiles(Files.cwd); }
-  catch (err) { toastErr(err); }
-  e.target.value = '';
-}
-
 /* ======================= Backups ======================= */
 async function renderBackups(c) {
   c.innerHTML = `
@@ -883,6 +962,15 @@ async function renderPanelSettings(body) {
         <button class="btn btn-primary btn-sm" id="pw-save">Изменить пароль</button>
       </div>
       <div class="card section-gap">
+        <div class="card-title-row"><h3>Обновление панели</h3><span class="badge neutral" id="upd-ver">…</span></div>
+        <div id="upd-info" class="dim" style="margin-bottom:12px">Проверка версии…</div>
+        <div class="pill-row">
+          <button class="btn btn-sm" id="upd-check">Проверить обновления</button>
+          <button class="btn btn-sm btn-primary hidden" id="upd-apply">⤓ Обновить сейчас</button>
+        </div>
+        <div class="hint" style="margin-top:10px">Обновление тянет последнюю версию из GitHub-репозитория и перезапускает панель. Настройки, бэкапы и вход сохраняются.</div>
+      </div>
+      <div class="card section-gap">
         <h3>О системе</h3>
         <table class="table">
           <tr><td>Версия панели</td><td class="right mono">${esc(sys.panelVersion)}</td></tr>
@@ -903,7 +991,73 @@ async function renderPanelSettings(body) {
       try { await API.changePassword($('#pw-cur').value, $('#pw-new').value); toast('Пароль изменён', 'success'); $('#pw-cur').value = ''; $('#pw-new').value = ''; }
       catch (err) { toastErr(err); }
     };
+    initUpdateCard();
   } catch (err) { toastErr(err); }
+}
+
+async function initUpdateCard() {
+  const info = $('#upd-info'), ver = $('#upd-ver'), checkBtn = $('#upd-check'), applyBtn = $('#upd-apply');
+  if (!info) return;
+  try {
+    const v = await API.version();
+    ver.textContent = 'v' + v.version + (v.sha ? ' · ' + v.sha : '');
+    if (!v.isGit) {
+      info.innerHTML = '⚠ Панель установлена не через git — авто-обновление недоступно. Используйте установщик <span class="mono">install.sh</span>.';
+      checkBtn.disabled = true;
+      return;
+    }
+    info.innerHTML = `Ветка <b>${esc(v.branch)}</b>, коммит <span class="mono">${esc(v.sha)}</span>` +
+      (v.subject ? ` — ${esc(v.subject)}` : '') + (v.date ? `<br><span class="dim">${fmtDate(Date.parse(v.date))}</span>` : '');
+  } catch (err) { info.textContent = 'Не удалось получить версию: ' + err.message; }
+
+  checkBtn.onclick = async () => {
+    checkBtn.disabled = true; const old = checkBtn.textContent; checkBtn.textContent = 'Проверка…';
+    try {
+      const r = await API.checkUpdate();
+      if (r.upToDate) { info.innerHTML = '✅ Установлена последняя версия.'; applyBtn.classList.add('hidden'); }
+      else {
+        info.innerHTML = `⬆ Доступно обновление: отставание на <b>${r.behind}</b> коммит(ов).` +
+          (r.latest ? `<br>Последний: <span class="mono">${esc(r.latest)}</span>` : '');
+        applyBtn.classList.remove('hidden');
+      }
+    } catch (err) { toastErr(err); }
+    finally { checkBtn.disabled = false; checkBtn.textContent = old; }
+  };
+
+  applyBtn.onclick = async () => {
+    if (!(await confirmDialog('Обновить панель до последней версии из репозитория? Панель перезапустится на несколько секунд.', { okText: 'Обновить' }))) return;
+    applyBtn.disabled = true;
+    try {
+      await API.applyUpdate();
+      waitForRestart();
+    } catch (err) { toastErr(err); applyBtn.disabled = false; }
+  };
+}
+
+// Show an overlay and poll health until the panel comes back after an update.
+function waitForRestart() {
+  const m = openModal({
+    title: 'Обновление панели',
+    body: `<p style="margin:0 0 10px;line-height:1.6">Панель обновляется и перезапускается.<br>Страница обновится автоматически, когда сервис снова станет доступен…</p>
+           <div class="bar"><span id="upd-bar" style="width:10%"></span></div>`,
+  });
+  // hide the close button — this is a blocking operation
+  const closeBtn = $('.modal-close', m.root); if (closeBtn) closeBtn.style.display = 'none';
+  let seenDown = false, tries = 0;
+  const bar = $('#upd-bar', m.root);
+  const timer = setInterval(async () => {
+    tries++;
+    if (bar) bar.style.width = Math.min(90, 10 + tries * 4) + '%';
+    try {
+      const res = await fetch('/api/health', { cache: 'no-store' });
+      if (!res.ok) { seenDown = true; return; }
+      // Require having seen it go down first, OR enough time passed, to avoid reloading before restart.
+      if (seenDown || tries > 6) { clearInterval(timer); if (bar) bar.style.width = '100%'; setTimeout(() => location.reload(), 600); }
+    } catch (_) {
+      seenDown = true; // service is restarting
+    }
+    if (tries > 90) { clearInterval(timer); location.reload(); }
+  }, 1500);
 }
 
 /* ======================= Go ======================= */

@@ -71,6 +71,10 @@ const API = (() => {
     savePanelSettings: (s) => post('/api/settings/panel', s),
     properties: () => get('/api/settings/properties'),
     saveProperties: (properties) => post('/api/settings/properties', { properties }),
+    // update
+    version: () => get('/api/update/version'),
+    checkUpdate: () => post('/api/update/check'),
+    applyUpdate: () => post('/api/update/apply'),
     // firewall
     firewall: () => get('/api/firewall'),
     fwEnable: () => post('/api/firewall/enable'),

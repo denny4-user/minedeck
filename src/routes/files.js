@@ -14,7 +14,7 @@ router.use(requireAuth);
 
 const upload = multer({
   dest: os.tmpdir(),
-  limits: { fileSize: 1024 * 1024 * 1024 }, // 1 GB per file
+  limits: { fileSize: 1024 * 1024 * 1024, files: 20000 }, // 1 GB per file
 });
 
 function handle(res, promise) {
@@ -49,7 +49,9 @@ router.post('/rename', (req, res) => {
   handle(res, files.rename(p, newName));
 });
 
-// Upload one or more files into a target directory.
+// Upload one or more files (and whole folders via drag-and-drop) into a
+// target directory. Optional `relpaths` (JSON array, aligned with the files)
+// preserves folder structure by carrying each file's path relative to dest.
 router.post('/upload', upload.array('files'), async (req, res) => {
   try {
     const dest = req.body.path || '';
@@ -58,17 +60,25 @@ router.post('/upload', upload.array('files'), async (req, res) => {
     if (!st || !st.isDirectory()) {
       throw Object.assign(new Error('Целевая папка не найдена.'), { status: 400 });
     }
+    let relpaths = [];
+    if (req.body.relpaths) {
+      try { relpaths = JSON.parse(req.body.relpaths); } catch (_) { relpaths = []; }
+    }
     const saved = [];
-    for (const file of req.files || []) {
-      const targetAbs = files.resolveSafe(path.join(dest, file.originalname));
+    const list = req.files || [];
+    for (let i = 0; i < list.length; i++) {
+      const file = list[i];
+      const rel = (Array.isArray(relpaths) && relpaths[i]) ? relpaths[i] : file.originalname;
+      const targetAbs = files.resolveSafe(path.join(dest, rel)); // guards against traversal
+      await fs.promises.mkdir(path.dirname(targetAbs), { recursive: true });
       await fs.promises.rename(file.path, targetAbs).catch(async () => {
         // rename across devices fails -> copy
         await fs.promises.copyFile(file.path, targetAbs);
         await fs.promises.unlink(file.path).catch(() => {});
       });
-      saved.push(file.originalname);
+      saved.push(rel);
     }
-    res.json({ ok: true, saved });
+    res.json({ ok: true, saved, count: saved.length });
   } catch (err) {
     // Clean up temp files on failure.
     for (const file of req.files || []) fs.promises.unlink(file.path).catch(() => {});

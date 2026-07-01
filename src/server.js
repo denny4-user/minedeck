@@ -12,6 +12,7 @@ config.load();
 const mcserver = require('./mcserver');
 const scheduler = require('./scheduler');
 const system = require('./system');
+const FileStore = require('./sessionStore');
 
 const app = express();
 const server = http.createServer(app);
@@ -25,6 +26,7 @@ const sessionParser = session({
   secret: config.get().panel.sessionSecret,
   resave: false,
   saveUninitialized: false,
+  store: new FileStore(require('path').join(config.DATA_DIR, 'sessions.json')),
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
@@ -42,6 +44,7 @@ app.use('/api/schedule', require('./routes/scheduler'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/firewall', require('./routes/firewall'));
 app.use('/api/system', require('./routes/system'));
+app.use('/api/update', require('./routes/update'));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, version: require('../package.json').version }));
 

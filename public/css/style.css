@@ -187,6 +187,16 @@ textarea { resize: vertical; font-family: var(--mono); font-size: 12.5px; }
 .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .toolbar .spacer { flex: 1; }
 
+/* ---------- Dropzone ---------- */
+#f-card { position: relative; transition: outline 0.15s; }
+#f-card.dragover { outline: 2px dashed var(--accent); outline-offset: -6px; }
+.dropzone-hint {
+  display: none; position: absolute; inset: 6px; z-index: 5; align-items: center; justify-content: center;
+  background: rgba(70, 209, 127, 0.10); border-radius: var(--radius); color: var(--accent);
+  font-weight: 700; font-size: 15px; pointer-events: none; backdrop-filter: blur(2px);
+}
+#f-card.dragover .dropzone-hint { display: flex; }
+
 /* ---------- Toggles / rows ---------- */
 .field { margin-bottom: 16px; }
 .field label { display: block; font-size: 12.5px; color: var(--muted); font-weight: 600; margin-bottom: 2px; }
