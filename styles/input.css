@@ -35,6 +35,17 @@
   .console .ln.in  { @apply text-info; }
   .console .ln.warn { @apply text-warning; }
 
+  /* Console TAB-completion suggestion popup */
+  .cmd-suggest {
+    @apply absolute left-0 z-30 flex flex-wrap gap-1 p-2 rounded-box bg-base-100 border border-base-300 shadow-2xl;
+    bottom: 100%; margin-bottom: 6px; max-width: 100%; max-height: 30vh; overflow-y: auto;
+  }
+  .cmd-suggest .chip {
+    @apply px-2 py-1 rounded-md text-xs font-mono cursor-pointer text-base-content/70 transition-colors;
+  }
+  .cmd-suggest .chip:hover { @apply bg-base-300 text-base-content; }
+  .cmd-suggest .chip.active { @apply bg-primary text-primary-content; }
+
   /* Status dot */
   .status-dot { @apply inline-block w-2.5 h-2.5 rounded-full bg-base-content/30; }
   .status-dot.running { @apply bg-success; box-shadow: 0 0 0 3px rgba(70,209,127,.25); animation: md-pulse 2s infinite; }

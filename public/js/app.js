@@ -129,7 +129,10 @@ const State = {
   stats: null,
   ws: null,
   view: 'dashboard',
+  cmdHistory: [],
+  players: new Set(),
 };
+try { State.cmdHistory = JSON.parse(localStorage.getItem('minedeck_cmdhist') || '[]'); } catch (_) {}
 
 /* ======================= Auth ======================= */
 async function boot() {
@@ -266,11 +269,45 @@ function updateStats(msg) {
 }
 
 /* ======================= Console ======================= */
+// Standard vanilla/Fabric 1.20.1 dedicated-server commands (for TAB completion
+// of the first token). Fixed list — Fabric 1.20.1 adds no player-facing commands.
+const MC_COMMANDS = ['advancement', 'attribute', 'ban', 'ban-ip', 'banlist', 'bossbar', 'clear', 'clone',
+  'damage', 'data', 'datapack', 'debug', 'defaultgamemode', 'deop', 'difficulty', 'effect', 'enchant',
+  'execute', 'experience', 'fill', 'fillbiome', 'forceload', 'function', 'gamemode', 'gamerule', 'give',
+  'help', 'item', 'jfr', 'kick', 'kill', 'list', 'locate', 'loot', 'me', 'msg', 'op', 'pardon', 'pardon-ip',
+  'particle', 'place', 'playsound', 'recipe', 'reload', 'ride', 'save-all', 'save-off', 'save-on', 'say',
+  'schedule', 'scoreboard', 'seed', 'setblock', 'setidletimeout', 'setworldspawn', 'spawnpoint', 'spectate',
+  'spreadplayers', 'stop', 'stopsound', 'summon', 'tag', 'team', 'teammsg', 'teleport', 'tell', 'tellraw',
+  'time', 'title', 'tm', 'tp', 'trigger', 'w', 'weather', 'whitelist', 'worldborder', 'xp'];
+// Sub-argument suggestions per command (falls back to online player names).
+const ARG_COMPLETIONS = {
+  gamemode: ['survival', 'creative', 'adventure', 'spectator'],
+  defaultgamemode: ['survival', 'creative', 'adventure', 'spectator'],
+  difficulty: ['peaceful', 'easy', 'normal', 'hard'],
+  weather: ['clear', 'rain', 'thunder'],
+  time: ['set', 'add', 'query'],
+  whitelist: ['add', 'remove', 'list', 'on', 'off', 'reload'],
+  datapack: ['list', 'enable', 'disable'],
+  gamerule: ['keepInventory', 'doDaylightCycle', 'doMobSpawning', 'mobGriefing', 'doFireTick',
+    'randomTickSpeed', 'doWeatherCycle', 'commandBlockOutput', 'doInsomnia', 'fallDamage',
+    'naturalRegeneration', 'showDeathMessages', 'spawnRadius', 'doImmediateRespawn'],
+};
+
+function collectPlayers(line) {
+  let m;
+  if ((m = line.match(/:\s*([A-Za-z0-9_]{1,16})\s+(?:joined|left) the game/))) State.players.add(m[1]);
+  else if ((m = line.match(/<([A-Za-z0-9_]{1,16})>/))) State.players.add(m[1]);
+  else if ((m = line.match(/:\s*([A-Za-z0-9_]{1,16})\[\//))) State.players.add(m[1]);
+  const list = line.match(/players online:\s*(.+)$/i);
+  if (list) list[1].split(',').map((s) => s.trim()).forEach((n) => { if (/^[A-Za-z0-9_]{1,16}$/.test(n)) State.players.add(n); });
+}
+
 function lineClass(stream) {
   return stream === 'err' ? 'err' : stream === 'sys' ? 'sys' : stream === 'in' ? 'in' : stream === 'warn' ? 'warn' : '';
 }
 function renderConsoleHistory(lines) {
   const box = $('#console');
+  (lines || []).forEach((e) => collectPlayers(e.line));
   if (!box) return;
   box.innerHTML = (lines || []).map((e) => `<span class="ln ${lineClass(e.stream)}">${esc(e.line)}</span>`).join('');
   box.scrollTop = box.scrollHeight;
@@ -279,6 +316,7 @@ function appendConsole(entry) {
   if (!State.history) State.history = [];
   State.history.push(entry);
   if (State.history.length > 400) State.history.shift();
+  collectPlayers(entry.line);
   const box = $('#console');
   if (!box) return;
   const near = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
@@ -288,6 +326,99 @@ function appendConsole(entry) {
   box.appendChild(span);
   while (box.childElementCount > 400) box.removeChild(box.firstChild);
   if (near) box.scrollTop = box.scrollHeight;
+}
+
+// Command-line UX for the console input: history (↑/↓), TAB completion (commands
+// + online player names + sub-args) with a small suggestion popup shown on TAB.
+function setupConsoleInput(input, sendFn) {
+  const suggest = $('#cmd-suggest');
+  let histIdx = -1;
+  let draft = '';
+  let cyc = null; // active TAB cycle: { before, after, cands, idx }
+
+  const hideSuggest = () => { cyc = null; suggest.classList.add('hidden'); suggest.innerHTML = ''; };
+  const showSuggest = (cands, idx) => {
+    suggest.innerHTML = cands.map((c, i) => `<span class="chip ${i === idx ? 'active' : ''}">${esc(c)}</span>`).join('');
+    suggest.classList.remove('hidden');
+    $$('.chip', suggest).forEach((chip, i) => chip.onclick = () => applyCandidate(i));
+  };
+
+  function currentToken() {
+    const pos = input.selectionStart != null ? input.selectionStart : input.value.length;
+    const left = input.value.slice(0, pos);
+    const start = left.lastIndexOf(' ') + 1;
+    return { start, token: left.slice(start), before: input.value.slice(0, start), after: input.value.slice(pos) };
+  }
+  function candidatesFor(token, before) {
+    const trimmed = before.trim();
+    let pool;
+    if (!trimmed) {
+      pool = MC_COMMANDS.slice().sort();
+    } else {
+      const cmd = trimmed.split(/\s+/)[0].toLowerCase().replace(/^\//, '');
+      // Command's own keyword args first, then online player names.
+      const players = [...State.players].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+      pool = (ARG_COMPLETIONS[cmd] || []).concat(players);
+    }
+    const t = token.toLowerCase();
+    const seen = new Set();
+    return pool.filter((c) => {
+      const lc = c.toLowerCase();
+      if (!lc.startsWith(t) || seen.has(lc)) return false;
+      seen.add(lc);
+      return true;
+    });
+  }
+  function applyCandidate(idx) {
+    if (!cyc) return;
+    cyc.idx = ((idx % cyc.cands.length) + cyc.cands.length) % cyc.cands.length;
+    const chosen = cyc.cands[cyc.idx];
+    input.value = cyc.before + chosen + cyc.after;
+    const caret = (cyc.before + chosen).length;
+    input.setSelectionRange(caret, caret);
+    showSuggest(cyc.cands, cyc.idx);
+  }
+  function doTab() {
+    if (cyc) { applyCandidate(cyc.idx + 1); return; }
+    const { token, before, after } = currentToken();
+    const cands = candidatesFor(token, before);
+    if (!cands.length) return;
+    if (cands.length === 1) { input.value = before + cands[0] + (after || ''); const c = (before + cands[0]).length; input.setSelectionRange(c, c); return; }
+    cyc = { before, after, cands, idx: 0 };
+    applyCandidate(0);
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') { e.preventDefault(); doTab(); return; }
+    if (e.key === 'Escape') { hideSuggest(); return; }
+    if (e.key === 'Enter') { hideSuggest(); const v = input.value; sendFn(); if (v.trim()) { pushHistory(v.trim()); } histIdx = -1; return; }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!State.cmdHistory.length) return;
+      if (histIdx === -1) { draft = input.value; histIdx = State.cmdHistory.length; }
+      histIdx = Math.max(0, histIdx - 1);
+      input.value = State.cmdHistory[histIdx];
+      requestAnimationFrame(() => input.setSelectionRange(input.value.length, input.value.length));
+      hideSuggest();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (histIdx === -1) return;
+      histIdx++;
+      if (histIdx >= State.cmdHistory.length) { histIdx = -1; input.value = draft; }
+      else input.value = State.cmdHistory[histIdx];
+      hideSuggest();
+    }
+  });
+  input.addEventListener('input', () => { if (cyc) hideSuggest(); });
+  input.addEventListener('blur', () => setTimeout(hideSuggest, 150));
+}
+
+function pushHistory(cmd) {
+  if (State.cmdHistory[State.cmdHistory.length - 1] !== cmd) {
+    State.cmdHistory.push(cmd);
+    if (State.cmdHistory.length > 100) State.cmdHistory.shift();
+    try { localStorage.setItem('minedeck_cmdhist', JSON.stringify(State.cmdHistory)); } catch (_) {}
+  }
 }
 
 /* ======================= Topbar controls ======================= */
@@ -350,9 +481,12 @@ function renderDashboard(c) {
       ${sectionTitle('Консоль сервера', '<button class="btn btn-ghost btn-xs" id="c-clear">Очистить вид</button>')}
       <div class="flex flex-col">
         <div class="console" id="console"></div>
-        <div class="flex gap-2 mt-2.5">
-          <input type="text" id="cmd-input" placeholder="Введите команду сервера и нажмите Enter…" autocomplete="off" class="input input-bordered flex-1 font-mono" />
-          <button class="btn btn-primary" id="cmd-send">Отправить</button>
+        <div class="relative">
+          <div id="cmd-suggest" class="cmd-suggest hidden"></div>
+          <div class="flex gap-2 mt-2.5">
+            <input type="text" id="cmd-input" placeholder="Команда сервера · ↑ история · Tab автодополнение" autocomplete="off" spellcheck="false" class="input input-bordered flex-1 font-mono" />
+            <button class="btn btn-primary" id="cmd-send">Отправить</button>
+          </div>
         </div>
       </div>
     </div></div>`;
@@ -365,8 +499,8 @@ function renderDashboard(c) {
     wsSend({ type: 'command', command: v });
     input.value = '';
   };
-  $('#cmd-send').onclick = send;
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  $('#cmd-send').onclick = () => { const v = input.value.trim(); send(); if (v) pushHistory(v); };
+  setupConsoleInput(input, send);
   $('#c-clear').onclick = () => { $('#console').innerHTML = ''; };
 
   updateDashStatusCard();
