@@ -612,6 +612,7 @@ async function renderFiles(c) {
           <button class="btn btn-sm btn-ghost gap-1.5" id="f-newdir">${icon('folder-plus')} Папка</button>
           <button class="btn btn-sm gap-1.5" id="f-uploaddir">${icon('upload')} Папка</button>
           <button class="btn btn-sm btn-primary gap-1.5" id="f-upload">${icon('upload')} Файлы</button>
+          <div id="f-progress" class="radial-progress text-primary hidden shrink-0 text-[10px] font-semibold" style="--size:2.2rem;--thickness:3px;--value:0;" role="progressbar" title="Загрузка">0%</div>
           <input type="file" id="f-file" multiple class="hidden" />
           <input type="file" id="f-filedir" webkitdirectory directory multiple class="hidden" />
         </div>
@@ -746,13 +747,27 @@ async function uploadItems(items) {
   const relpaths = [];
   for (const it of items) { fd.append('files', it.file, it.file.name); relpaths.push(it.path); }
   fd.append('relpaths', JSON.stringify(relpaths));
-  const label = items.length === 1 ? items[0].path : `${items.length} файл(ов)`;
+
+  const prog = $('#f-progress');
+  const setProg = (frac) => {
+    if (!prog) return;
+    const pct = Math.round(Math.max(0, Math.min(1, frac)) * 100);
+    prog.style.setProperty('--value', pct);
+    // At 100% the server may still be finishing — show a check when done via caller.
+    prog.textContent = pct + '%';
+  };
+  if (prog) { prog.classList.remove('hidden'); setProg(0); }
+
   try {
-    toast(`Загрузка: ${label}…`, 'info');
-    const r = await API.upload(Files.cwd, fd);
+    const r = await API.uploadXHR(Files.cwd, fd, setProg);
+    setProg(1);
     toast(`Загружено: ${r.count != null ? r.count : (r.saved || []).length}`, 'success');
     loadFiles(Files.cwd);
-  } catch (err) { toastErr(err); }
+  } catch (err) {
+    toastErr(err);
+  } finally {
+    if (prog) setTimeout(() => prog.classList.add('hidden'), 400);
+  }
 }
 async function loadFiles(path) {
   try {
