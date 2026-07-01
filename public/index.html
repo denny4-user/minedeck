@@ -65,15 +65,18 @@
         <img src="/favicon.svg" alt="" class="w-7 h-7" /> MineDeck
       </div>
       <nav class="flex flex-col gap-1 mt-1">
-        <a href="#/dashboard" data-view="dashboard" class="nav-item"><span class="w-5 text-center">▤</span> Панель</a>
-        <a href="#/files" data-view="files" class="nav-item"><span class="w-5 text-center">🗀</span> Файлы</a>
-        <a href="#/backups" data-view="backups" class="nav-item"><span class="w-5 text-center">🗄</span> Бэкапы</a>
-        <a href="#/timers" data-view="timers" class="nav-item"><span class="w-5 text-center">⏱</span> Таймеры</a>
-        <a href="#/settings" data-view="settings" class="nav-item"><span class="w-5 text-center">⚙</span> Настройки</a>
+        <a href="#/dashboard" data-view="dashboard" class="nav-item"><span data-icon="dashboard"></span> Панель</a>
+        <a href="#/files" data-view="files" class="nav-item"><span data-icon="folder"></span> Файлы</a>
+        <a href="#/databases" data-view="databases" class="nav-item"><span data-icon="database"></span> Базы данных</a>
+        <a href="#/backups" data-view="backups" class="nav-item"><span data-icon="archive"></span> Бэкапы</a>
+        <a href="#/timers" data-view="timers" class="nav-item"><span data-icon="timer"></span> Таймеры</a>
+        <a href="#/properties" data-view="properties" class="nav-item"><span data-icon="sliders"></span> server.properties</a>
+        <a href="#/firewall" data-view="firewall" class="nav-item"><span data-icon="shield"></span> Фаервол</a>
+        <a href="#/settings" data-view="settings" class="nav-item"><span data-icon="settings"></span> Настройки</a>
       </nav>
       <div class="mt-auto flex flex-col gap-3">
         <div id="sys-mini" class="text-[11px] text-base-content/40 px-2 leading-relaxed"></div>
-        <button id="logout-btn" class="btn btn-ghost btn-sm w-full">Выйти</button>
+        <button id="logout-btn" class="btn btn-ghost btn-sm w-full gap-2"><span data-icon="logout"></span> Выйти</button>
       </div>
     </aside>
     <div id="sidebar-backdrop" class="hidden fixed inset-0 bg-black/50 z-30 lg:hidden"></div>
@@ -81,17 +84,17 @@
     <div class="flex-1 flex flex-col overflow-hidden min-w-0">
       <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b border-base-300 bg-base-200/40 backdrop-blur">
         <div class="flex items-center gap-3 min-w-0">
-          <button id="sidebar-toggle" class="btn btn-ghost btn-sm btn-square lg:hidden">☰</button>
+          <button id="sidebar-toggle" class="btn btn-ghost btn-sm btn-square lg:hidden"><span data-icon="menu"></span></button>
           <div class="badge badge-lg gap-2 h-9 border-base-300 bg-base-100" id="status-pill">
             <span class="status-dot" id="status-dot"></span><span id="status-text" class="font-semibold">—</span>
           </div>
           <div id="uptime-text" class="text-xs text-base-content/50 hidden sm:block"></div>
         </div>
         <div class="flex gap-2">
-          <button class="btn btn-success btn-sm" id="btn-start">▶ Запуск</button>
-          <button class="btn btn-warning btn-sm" id="btn-restart">⟳ Рестарт</button>
-          <button class="btn btn-error btn-sm" id="btn-stop">■ Стоп</button>
-          <button class="btn btn-ghost btn-sm btn-square" id="btn-kill" title="Принудительно завершить">✕</button>
+          <button class="btn btn-success btn-sm gap-1.5" id="btn-start"><span data-icon="play"></span> Запуск</button>
+          <button class="btn btn-warning btn-sm gap-1.5" id="btn-restart"><span data-icon="restart"></span> Рестарт</button>
+          <button class="btn btn-error btn-sm gap-1.5" id="btn-stop"><span data-icon="stop"></span> Стоп</button>
+          <button class="btn btn-ghost btn-sm btn-square" id="btn-kill" title="Принудительно завершить"><span data-icon="zap"></span></button>
         </div>
       </header>
 
@@ -103,6 +106,7 @@
   <div id="toasts" class="toast toast-end z-[200]"></div>
   <div id="modal-root"></div>
 
+  <script src="/js/icons.js"></script>
   <script src="/js/api.js"></script>
   <script src="/js/app.js"></script>
 </body>

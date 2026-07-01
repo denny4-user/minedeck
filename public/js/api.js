@@ -71,6 +71,14 @@ const API = (() => {
     savePanelSettings: (s) => post('/api/settings/panel', s),
     properties: () => get('/api/settings/properties'),
     saveProperties: (properties) => post('/api/settings/properties', { properties }),
+    // databases
+    databases: () => get('/api/databases'),
+    dbConfig: (c) => post('/api/databases/config', c),
+    dbTest: () => post('/api/databases/test'),
+    dbCreate: (name) => post('/api/databases/create', { name }),
+    dbDelete: (name) => post('/api/databases/delete', { name }),
+    dbInfo: (name) => get('/api/databases/info?name=' + encodeURIComponent(name)),
+    dbQuery: (name, sql) => post('/api/databases/query', { name, sql }),
     // update
     version: () => get('/api/update/version'),
     checkUpdate: () => post('/api/update/check'),

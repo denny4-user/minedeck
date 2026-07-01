@@ -69,10 +69,14 @@
     border: 1px solid theme('colors.base-300');
   }
 
+  /* Inline Lucide icons */
+  .mi { display: inline-block; width: 1.15em; height: 1.15em; vertical-align: -0.18em; flex-shrink: 0; }
+
   /* Sidebar navigation */
   .nav-item {
     @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-base-content/60 font-medium transition-colors;
   }
+  .nav-item .mi { @apply w-[18px] h-[18px] opacity-80; }
   .nav-item:hover { @apply bg-base-100 text-base-content; }
   .nav-item.active {
     @apply bg-base-300 text-base-content;

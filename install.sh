@@ -75,6 +75,26 @@ install_java() {
   fi
 }
 
+install_mariadb() {
+  if [[ "${MINEDECK_SKIP_DB:-0}" == "1" ]]; then
+    warn "Пропуск установки MariaDB (MINEDECK_SKIP_DB=1). Раздел «Базы данных» можно настроить позже."
+    return
+  fi
+  if command -v mysqld >/dev/null 2>&1 || command -v mariadbd >/dev/null 2>&1; then
+    log "MySQL/MariaDB уже установлена."
+  else
+    log "Установка MariaDB (для раздела «Базы данных»)…"
+    export DEBIAN_FRONTEND=noninteractive
+    if apt-get install -y -qq mariadb-server >/dev/null 2>&1; then
+      log "MariaDB установлена."
+    else
+      warn "Не удалось установить MariaDB. Раздел «Базы данных» можно настроить позже."
+      return
+    fi
+  fi
+  systemctl enable --now mariadb >/dev/null 2>&1 || systemctl enable --now mysql >/dev/null 2>&1 || true
+}
+
 # --- Загрузка / обновление кода ---------------------------------------------
 fetch_code() {
   if [[ -d "${INSTALL_DIR}/.git" ]]; then
@@ -156,6 +176,7 @@ main() {
   install_base
   install_node
   install_java
+  install_mariadb
   fetch_code
   install_deps
   prepare_dirs

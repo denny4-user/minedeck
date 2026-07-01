@@ -45,6 +45,7 @@ app.use('/api/settings', require('./routes/settings'));
 app.use('/api/firewall', require('./routes/firewall'));
 app.use('/api/system', require('./routes/system'));
 app.use('/api/update', require('./routes/update'));
+app.use('/api/databases', require('./routes/databases'));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, version: require('../package.json').version }));
 

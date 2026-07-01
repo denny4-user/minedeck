@@ -36,6 +36,11 @@ function fmtDate(ms) {
   return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// Fill static [data-icon] placeholders (sidebar, topbar) with inline SVGs.
+function hydrateIcons(root = document) {
+  $$('[data-icon]', root).forEach((el) => { if (!el.firstChild) el.innerHTML = icon(el.dataset.icon); });
+}
+
 /* ---- Shared markup builders (daisyUI) ---- */
 const CARD = 'card bg-base-100 border border-base-300 shadow-sm';
 const INPUT = 'input input-bordered w-full';
@@ -128,6 +133,7 @@ const State = {
 
 /* ======================= Auth ======================= */
 async function boot() {
+  hydrateIcons();
   try {
     const s = await API.authStatus();
     State.username = s.username;
@@ -306,7 +312,7 @@ async function promptEula() {
 }
 
 /* ======================= Router ======================= */
-const VIEWS = ['dashboard', 'files', 'backups', 'timers', 'settings'];
+const VIEWS = ['dashboard', 'files', 'databases', 'backups', 'timers', 'properties', 'firewall', 'settings'];
 function router() {
   let view = (location.hash.replace('#/', '') || 'dashboard').split('/')[0];
   if (!VIEWS.includes(view)) view = 'dashboard';
@@ -315,8 +321,11 @@ function router() {
   const c = $('#content');
   if (view === 'dashboard') renderDashboard(c);
   else if (view === 'files') renderFiles(c);
+  else if (view === 'databases') renderDatabases(c);
   else if (view === 'backups') renderBackups(c);
   else if (view === 'timers') renderTimers(c);
+  else if (view === 'properties') renderPropertiesPage(c);
+  else if (view === 'firewall') renderFirewallPage(c);
   else if (view === 'settings') renderSettings(c);
 }
 
@@ -403,17 +412,17 @@ const Files = { cwd: '' };
 async function renderFiles(c) {
   c.innerHTML = `
     ${pageHead('Файлы', 'Файловый менеджер — перетащите файлы или папки для загрузки')}
-    <div class="${CARD} relative drop-target" id="f-card">
-      <div class="dropzone-hint" id="f-drop-hint">⭱ Отпустите, чтобы загрузить в текущую папку</div>
+    <div class="${CARD} relative drop-target select-none" id="f-card">
+      <div class="dropzone-hint" id="f-drop-hint">${icon('upload')} Отпустите, чтобы загрузить в текущую папку</div>
       <div class="card-body p-4">
         <div class="flex items-center gap-2 flex-wrap mb-3">
-          <button class="btn btn-sm btn-ghost" id="f-up">↑ Вверх</button>
-          <button class="btn btn-sm btn-ghost" id="f-refresh">⟳ Обновить</button>
+          <button class="btn btn-sm btn-ghost gap-1.5" id="f-up">${icon('up')} Вверх</button>
+          <button class="btn btn-sm btn-ghost gap-1.5" id="f-refresh">${icon('refresh')} Обновить</button>
           <div class="flex-1"></div>
-          <button class="btn btn-sm btn-ghost" id="f-newfile">＋ Файл</button>
-          <button class="btn btn-sm btn-ghost" id="f-newdir">＋ Папка</button>
-          <button class="btn btn-sm" id="f-uploaddir">⭱ Папка</button>
-          <button class="btn btn-sm btn-primary" id="f-upload">⭱ Файлы</button>
+          <button class="btn btn-sm btn-ghost gap-1.5" id="f-newfile">${icon('file-plus')} Файл</button>
+          <button class="btn btn-sm btn-ghost gap-1.5" id="f-newdir">${icon('folder-plus')} Папка</button>
+          <button class="btn btn-sm gap-1.5" id="f-uploaddir">${icon('upload')} Папка</button>
+          <button class="btn btn-sm btn-primary gap-1.5" id="f-upload">${icon('upload')} Файлы</button>
           <input type="file" id="f-file" multiple class="hidden" />
           <input type="file" id="f-filedir" webkitdirectory directory multiple class="hidden" />
         </div>
@@ -510,7 +519,7 @@ async function loadFiles(path) {
 function renderCrumbs(path) {
   const parts = path.split('/').filter(Boolean);
   let acc = '';
-  let html = `<li><a data-p="" class="cursor-pointer">🗀 сервер</a></li>`;
+  let html = `<li><a data-p="" class="cursor-pointer gap-1.5">${icon('folder')} сервер</a></li>`;
   for (const part of parts) {
     acc += (acc ? '/' : '') + part;
     html += `<li><a data-p="${esc(acc)}" class="cursor-pointer">${esc(part)}</a></li>`;
@@ -533,12 +542,12 @@ function renderFileList(entries) {
     <thead><tr><th>Имя</th><th class="w-24">Размер</th><th class="w-40">Изменён</th><th class="w-10"></th></tr></thead>
     <tbody>${
     entries.map((e) => {
-      const icon = e.type === 'dir' ? '<span class="text-warning">🗀</span>' : '<span class="text-base-content/40">🗎</span>';
+      const ic = e.type === 'dir' ? `<span class="text-warning">${icon('folder')}</span>` : `<span class="text-base-content/40">${icon(e.editable ? 'file' : 'file-plain')}</span>`;
       return `<tr class="hover" data-path="${esc(e.path)}" data-type="${e.type}" data-editable="${e.editable}" data-name="${esc(e.name)}">
-        <td><div class="flex items-center gap-2.5">${icon}<span class="lnk cursor-pointer hover:text-primary font-medium">${esc(e.name)}</span></div></td>
+        <td><div class="flex items-center gap-2.5">${ic}<span class="lnk cursor-pointer hover:text-primary font-medium">${esc(e.name)}</span></div></td>
         <td class="text-base-content/50 whitespace-nowrap">${e.type === 'dir' ? '—' : fmtBytes(e.size)}</td>
         <td class="text-base-content/50 whitespace-nowrap">${e.modified ? fmtDate(e.modified) : '—'}</td>
-        <td class="text-right"><button class="kebab-btn" title="Действия">⋮</button></td></tr>`;
+        <td class="text-right"><button class="kebab-btn" title="Действия">${icon('kebab')}</button></td></tr>`;
     }).join('')
   }</tbody></table>`;
 
@@ -549,11 +558,11 @@ function renderFileList(entries) {
     $('.kebab-btn', tr).onclick = (ev) => {
       ev.stopPropagation();
       const actions = [];
-      if (type === 'dir') actions.push({ label: 'Открыть', icon: '🗀', onClick: () => loadFiles(path) });
-      if (editable) actions.push({ label: 'Редактировать', icon: '✎', onClick: () => editFile(path, name) });
-      actions.push({ label: type === 'dir' ? 'Скачать (.tar.gz)' : 'Скачать', icon: '⭳', onClick: () => window.open(API.downloadUrl(path)) });
-      actions.push({ label: 'Переименовать', icon: '✏', onClick: () => renameEntry(path, name) });
-      actions.push({ label: 'Удалить', icon: '🗑', danger: true, onClick: () => deleteEntry(path, name) });
+      if (type === 'dir') actions.push({ label: 'Открыть', icon: icon('folder-open'), onClick: () => loadFiles(path) });
+      if (editable) actions.push({ label: 'Редактировать', icon: icon('edit'), onClick: () => editFile(path, name) });
+      actions.push({ label: type === 'dir' ? 'Скачать (.tar.gz)' : 'Скачать', icon: icon('download'), onClick: () => window.open(API.downloadUrl(path)) });
+      actions.push({ label: 'Переименовать', icon: icon('edit'), onClick: () => renameEntry(path, name) });
+      actions.push({ label: 'Удалить', icon: icon('trash'), danger: true, onClick: () => deleteEntry(path, name) });
       openKebab(ev.currentTarget, actions);
     };
   });
@@ -644,7 +653,7 @@ async function deleteEntry(path, name) {
 /* ======================= Backups ======================= */
 async function renderBackups(c) {
   c.innerHTML = `
-    ${pageHead('Бэкапы', 'Резервные копии всей директории сервера (.tar.gz)', '<button class="btn btn-primary btn-sm" id="b-create">＋ Создать бэкап</button>')}
+    ${pageHead('Бэкапы', 'Резервные копии всей директории сервера (.tar.gz)', `<button class="btn btn-primary btn-sm gap-1.5" id="b-create">${icon('plus')} Создать бэкап</button>`)}
     <div id="b-list" class="${CARD}"><div class="card-body p-4">${empty('Загрузка…')}</div></div>
     <div class="${CARD} mt-4"><div class="card-body p-5">
       ${sectionTitle('Настройки хранения')}
@@ -680,9 +689,9 @@ async function loadBackups() {
         <td class="text-base-content/50 whitespace-nowrap">${fmtBytes(b.size)}</td>
         <td class="text-base-content/50 whitespace-nowrap">${fmtDate(b.created)}</td>
         <td class="text-right whitespace-nowrap" data-name="${esc(b.name)}">
-          <button class="btn btn-ghost btn-xs" data-a="download">⭳ Скачать</button>
-          <button class="btn btn-warning btn-xs" data-a="restore">↺ Восстановить</button>
-          <button class="btn btn-error btn-xs" data-a="delete">🗑</button>
+          <button class="btn btn-ghost btn-xs gap-1" data-a="download">${icon('download')} Скачать</button>
+          <button class="btn btn-warning btn-xs gap-1" data-a="restore">${icon('rotate-ccw')} Восстановить</button>
+          <button class="btn btn-error btn-xs" data-a="delete">${icon('trash')}</button>
         </td></tr>`).join('')
     }</tbody></table></div>`;
     $$('td[data-name]', box).forEach((td) => {
@@ -727,7 +736,7 @@ async function deleteBackup(name) {
 const ACTION_LABEL = { restart: 'Перезапуск', stop: 'Остановка', start: 'Запуск', backup: 'Бэкап', command: 'Команда' };
 async function renderTimers(c) {
   c.innerHTML = `
-    ${pageHead('Таймеры', 'Плановые задачи: рестарты, бэкапы, команды по расписанию', '<button class="btn btn-primary btn-sm" id="t-add">＋ Новая задача</button>')}
+    ${pageHead('Таймеры', 'Плановые задачи: рестарты, бэкапы, команды по расписанию', `<button class="btn btn-primary btn-sm gap-1.5" id="t-add">${icon('plus')} Новая задача</button>`)}
     <div id="t-list" class="${CARD}"><div class="card-body p-4">${empty('Загрузка…')}</div></div>`;
   $('#t-add').onclick = () => taskDialog(null);
   await loadTasks();
@@ -748,8 +757,8 @@ async function loadTasks() {
           <td>${ACTION_LABEL[t.action] || t.action}</td>
           <td class="text-base-content/50 whitespace-nowrap">${t.enabled ? fmtDate(t.nextRun) : '—'}</td>
           <td class="text-right whitespace-nowrap">
-            <button class="btn btn-ghost btn-xs" data-a="edit">✎</button>
-            <button class="btn btn-error btn-xs" data-a="del">🗑</button>
+            <button class="btn btn-ghost btn-xs" data-a="edit">${icon('edit')}</button>
+            <button class="btn btn-error btn-xs" data-a="del">${icon('trash')}</button>
           </td></tr>`;
       }).join('')
     }</tbody></table></div>`;
@@ -821,15 +830,172 @@ function taskDialog(task) {
   };
 }
 
+/* ======================= Databases (MySQL/MariaDB) ======================= */
+async function renderDatabases(c) {
+  c.innerHTML = pageHead('Базы данных', 'MySQL / MariaDB на этом сервере — создание баз, доступы и SQL-консоль',
+    `<button class="btn btn-primary btn-sm gap-1.5 hidden" id="db-create">${icon('plus')} Создать базу</button>`)
+    + `<div id="db-body"><div class="${CARD}"><div class="card-body p-4">${empty('Загрузка…')}</div></div></div>`;
+  $('#db-create').onclick = () => dbCreateDialog();
+  await loadDatabases();
+}
+async function loadDatabases() {
+  const body = $('#db-body');
+  try {
+    const st = await API.databases();
+    State.dbStatus = st;
+    if (!st.connection.ok) { $('#db-create').classList.add('hidden'); renderDbConfig(body, st); }
+    else { $('#db-create').classList.remove('hidden'); renderDbList(body, st); }
+  } catch (err) { toastErr(err); body.innerHTML = `<div class="${CARD}"><div class="card-body p-4">${empty('Ошибка: ' + esc(err.message))}</div></div>`; }
+}
+function renderDbConfig(body, st) {
+  const m = st.mysql || {};
+  const errBanner = st.connection && st.connection.error
+    ? `<div class="alert alert-warning py-2 text-sm mb-4"><span>Нет подключения к MySQL/MariaDB: ${esc(st.connection.error)}</span></div>` : '';
+  body.innerHTML = `<div class="${CARD}"><div class="card-body p-5">
+    ${sectionTitle('Подключение к MySQL / MariaDB')}
+    ${errBanner}
+    <div class="grid gap-4 sm:grid-cols-2">
+      ${field('Хост', `<input id="db-host" class="${INPUT}" value="${esc(m.host || '127.0.0.1')}" />`)}
+      ${field('Порт', `<input id="db-port" type="number" class="${INPUT}" value="${m.port || 3306}" />`)}
+      ${field('Пользователь-администратор', `<input id="db-user" class="${INPUT}" value="${esc(m.adminUser || 'root')}" />`)}
+      ${field('Пароль администратора', `<input id="db-pass" type="password" class="${INPUT}" placeholder="${m.hasPassword ? '•••••• (сохранён)' : 'пусто'}" />`)}
+      ${field('Unix-сокет (необязательно)', `<input id="db-sock" class="${INPUT}" value="${esc(m.socketPath || '')}" placeholder="/run/mysqld/mysqld.sock" />`)}
+      ${field('Хост для новых пользователей (GRANT)', `<input id="db-grant" class="${INPUT}" value="${esc(m.grantHost || '%')}" />`)}
+    </div>
+    <div class="alert py-2 text-sm mt-2 bg-base-200 border-base-300"><span>💡 На Ubuntu с MariaDB панель работает от root — обычно достаточно указать сокет <span class="font-mono">/run/mysqld/mysqld.sock</span>, пользователя <span class="font-mono">root</span> и пустой пароль (аутентификация через unix_socket).</span></div>
+    <button class="btn btn-primary btn-sm mt-3 gap-1.5" id="db-save">${icon('check')} Проверить и сохранить</button>
+  </div></div>`;
+  $('#db-save').onclick = async () => {
+    const patch = { host: $('#db-host').value, port: $('#db-port').value, adminUser: $('#db-user').value, socketPath: $('#db-sock').value, grantHost: $('#db-grant').value };
+    const pass = $('#db-pass').value;
+    if (pass) patch.adminPassword = pass;
+    try {
+      const r = await API.dbConfig(patch);
+      if (r.connection && r.connection.ok) toast('Подключение успешно', 'success');
+      else toast('Не удалось подключиться: ' + ((r.connection && r.connection.error) || ''), 'error');
+      loadDatabases();
+    } catch (err) { toastErr(err); }
+  };
+}
+function renderDbList(body, st) {
+  const dbs = st.databases;
+  const rows = dbs.map((d) => `<tr class="hover">
+    <td class="font-medium">${esc(d.name)} ${d.managed ? '' : '<span class="badge badge-ghost badge-sm">внешняя</span>'}</td>
+    <td class="text-base-content/50 whitespace-nowrap">${d.sizeMB} МБ</td>
+    <td class="text-base-content/50">${d.tables}</td>
+    <td class="font-mono text-xs text-base-content/60">${d.managed ? esc(d.user + '@' + d.host + ':' + d.port) : '—'}</td>
+    <td class="text-right whitespace-nowrap" data-name="${esc(d.name)}">
+      ${d.managed ? `<button class="btn btn-ghost btn-xs gap-1" data-a="creds">${icon('key')} Данные</button>` : ''}
+      <button class="btn btn-ghost btn-xs gap-1" data-a="sql">${icon('terminal')} SQL</button>
+      <button class="btn btn-error btn-xs" data-a="del">${icon('trash')}</button>
+    </td></tr>`).join('');
+  body.innerHTML = `<div class="${CARD}"><div class="card-body p-4">
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <div class="flex items-center gap-2 text-sm text-base-content/60">${icon('database')} Подключено <span class="badge badge-success badge-sm">${esc(st.connection.version || 'ok')}</span></div>
+      <button class="btn btn-ghost btn-xs gap-1" id="db-reconfig">${icon('settings')} Подключение</button>
+    </div>
+    <div class="overflow-x-auto">${dbs.length ? `<table class="table table-sm">
+      <thead><tr><th>База</th><th>Размер</th><th>Таблиц</th><th>Доступ (user@host)</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table>` : empty('Баз пока нет. Нажмите «Создать базу».')}</div>
+  </div></div>`;
+  $('#db-reconfig').onclick = () => renderDbConfig(body, st);
+  $$('td[data-name]', body).forEach((td) => {
+    const name = td.dataset.name;
+    const d = dbs.find((x) => x.name === name);
+    $$('[data-a]', td).forEach((btn) => btn.onclick = () => {
+      const a = btn.dataset.a;
+      if (a === 'creds') dbCredsDialog(d);
+      else if (a === 'sql') dbQueryDialog(d);
+      else if (a === 'del') dbDelete(name, d.managed);
+    });
+  });
+}
+function credRow(label, value) {
+  return `<div class="flex items-center justify-between gap-3 py-2 border-b border-base-300/50 last:border-0">
+    <span class="text-base-content/50 text-sm">${label}</span>
+    <span class="font-mono text-xs bg-base-200 px-2 py-1 rounded select-all break-all">${esc(value)}</span>
+  </div>`;
+}
+function dbCredsDialog(d) {
+  const m = openModal({
+    title: 'Данные подключения — ' + d.name,
+    body: `<div>
+      ${credRow('Хост', d.host)}${credRow('Порт', d.port)}${credRow('База данных', d.name)}
+      ${credRow('Пользователь', d.user)}${credRow('Пароль', d.password)}
+      ${credRow('JDBC URL', `jdbc:mysql://${d.host}:${d.port}/${d.name}`)}
+    </div>
+    <div class="text-xs text-base-content/40 mt-2">Вставьте эти данные в конфиг плагина. Тройной клик по значению выделяет его для копирования.</div>`,
+    footer: `<button class="btn btn-primary" data-close2>Закрыть</button>`,
+  });
+  $('[data-close2]', m.root).onclick = m.close;
+}
+function dbCreateDialog() {
+  const m = openModal({
+    title: 'Создать базу данных',
+    body: field('Имя базы', `<input id="dbname" class="${INPUT}" placeholder="myplugin" />`, 'Латиница, цифры, _ (до 32). Пользователь и пароль создадутся автоматически.'),
+    footer: `<button class="btn btn-ghost" data-c>Отмена</button><button class="btn btn-primary" data-ok>Создать</button>`,
+  });
+  const inp = $('#dbname', m.root); inp.focus();
+  $('[data-c]', m.root).onclick = m.close;
+  $('[data-ok]', m.root).onclick = async () => {
+    const name = inp.value.trim();
+    if (!name) return;
+    try {
+      const r = await API.dbCreate(name);
+      m.close(); toast('База создана', 'success'); loadDatabases();
+      const db = r.database;
+      dbCredsDialog({ name: db.name, user: db.user, password: db.password, host: db.connHost, port: db.port });
+    } catch (err) { toastErr(err); }
+  };
+}
+async function dbDelete(name, managed) {
+  if (!(await confirmDialog(`Удалить базу «${name}»${managed ? ' и её пользователя' : ''}? Все данные будут потеряны безвозвратно.`, { danger: true, okText: 'Удалить' }))) return;
+  try { await API.dbDelete(name); toast('База удалена', 'success'); loadDatabases(); }
+  catch (err) { toastErr(err); }
+}
+function dbQueryDialog(d) {
+  const m = openModal({
+    title: 'SQL-консоль — ' + d.name, wide: true,
+    body: `<textarea id="sqlbox" class="textarea textarea-bordered w-full font-mono text-xs leading-relaxed" style="height:20vh" spellcheck="false" placeholder="SELECT * FROM ... ;"></textarea>
+      <div class="flex justify-between items-center mt-2">
+        <span class="text-xs text-base-content/40">Ctrl/Cmd + Enter — выполнить</span>
+        <button class="btn btn-primary btn-sm gap-1.5" id="sqlrun">${icon('play')} Выполнить</button>
+      </div>
+      <div id="sqlres" class="mt-3"></div>`,
+    footer: `<button class="btn btn-ghost" data-close2>Закрыть</button>`,
+  });
+  $('[data-close2]', m.root).onclick = m.close;
+  const run = async () => {
+    const sql = $('#sqlbox', m.root).value.trim();
+    if (!sql) return;
+    const res = $('#sqlres', m.root);
+    res.innerHTML = '<span class="loading loading-spinner loading-sm"></span>';
+    try {
+      const { result } = await API.dbQuery(d.name, sql);
+      if (result.type === 'ok') {
+        res.innerHTML = `<div class="alert alert-success py-2 text-sm"><span>✓ Готово. Затронуто строк: ${result.affectedRows}. ${esc(result.info || '')}</span></div>`;
+      } else if (!result.rows.length) {
+        res.innerHTML = `<div class="text-base-content/50 text-sm py-2">Запрос выполнен, строк нет.</div>`;
+      } else {
+        res.innerHTML = `<div class="overflow-auto max-h-[45vh] border border-base-300 rounded-lg"><table class="table table-xs table-pin-rows">
+          <thead><tr>${result.columns.map((col) => `<th>${esc(col)}</th>`).join('')}</tr></thead>
+          <tbody>${result.rows.map((r) => `<tr>${r.map((v) => `<td class="font-mono text-xs">${v === null ? '<span class="text-base-content/30">NULL</span>' : esc(v)}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table></div>${result.truncated ? `<div class="text-xs text-base-content/40 mt-1">Показаны первые 500 из ${result.total} строк.</div>` : ''}`;
+      }
+    } catch (err) { res.innerHTML = `<div class="alert alert-error py-2 text-sm"><span>${esc(err.message)}</span></div>`; }
+  };
+  $('#sqlrun', m.root).onclick = run;
+  $('#sqlbox', m.root).addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') run(); });
+}
+
 /* ======================= Settings ======================= */
 let settingsTab = 'server';
 async function renderSettings(c) {
+  if (settingsTab !== 'server' && settingsTab !== 'panel') settingsTab = 'server';
   c.innerHTML = `
-    ${pageHead('Настройки', 'Сервер, порты, фаервол и панель')}
+    ${pageHead('Настройки', 'Параметры запуска сервера и самой панели')}
     <div role="tablist" class="tabs tabs-bordered mb-5">
       <a role="tab" class="tab" data-t="server">Сервер и ОЗУ</a>
-      <a role="tab" class="tab" data-t="properties">server.properties</a>
-      <a role="tab" class="tab" data-t="firewall">Фаервол</a>
       <a role="tab" class="tab" data-t="panel">Панель</a>
     </div>
     <div id="settings-body"></div>`;
@@ -839,9 +1005,18 @@ async function renderSettings(c) {
   });
   const body = $('#settings-body');
   if (settingsTab === 'server') renderServerSettings(body);
-  else if (settingsTab === 'properties') renderProperties(body);
-  else if (settingsTab === 'firewall') renderFirewall(body);
   else if (settingsTab === 'panel') renderPanelSettings(body);
+}
+
+// server.properties as its own top-level page
+function renderPropertiesPage(c) {
+  c.innerHTML = pageHead('server.properties', 'Настройки Minecraft-сервера (порт, MOTD, сложность и т.д.)') + '<div id="settings-body"></div>';
+  renderProperties($('#settings-body'));
+}
+// Firewall as its own top-level page
+function renderFirewallPage(c) {
+  c.innerHTML = pageHead('Фаервол', 'Управление портами через ufw') + '<div id="settings-body"></div>';
+  renderFirewall($('#settings-body'));
 }
 
 function toggleRow(label, sub, id, checked) {

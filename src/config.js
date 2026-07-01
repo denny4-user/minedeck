@@ -66,6 +66,17 @@ function defaultConfig() {
     schedule: {
       tasks: [],
     },
+    databases: {
+      mysql: {
+        host: '127.0.0.1',
+        port: 3306,
+        adminUser: 'root',
+        adminPassword: '',
+        socketPath: '/run/mysqld/mysqld.sock',
+        grantHost: '%',
+      },
+      created: [],
+    },
   };
 }
 
