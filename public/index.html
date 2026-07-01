@@ -1,98 +1,106 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="minedeck">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#0f1216" />
+  <meta name="theme-color" content="#0e1217" />
   <title>MineDeck — панель управления сервером</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/app.css" />
 </head>
-<body>
+<body class="min-h-screen">
   <!-- ================= AUTH SCREEN ================= -->
-  <div id="auth-screen" class="auth-screen hidden">
-    <div class="auth-card">
-      <div class="brand">
-        <img src="/favicon.svg" alt="" class="brand-logo" />
-        <div>
-          <div class="brand-name">MineDeck</div>
-          <div class="brand-sub">Панель управления Minecraft</div>
+  <div id="auth-screen" class="hidden min-h-screen flex flex-col items-center justify-center gap-4 p-6">
+    <div class="card w-full max-w-md bg-base-100 border border-base-300 shadow-xl">
+      <div class="card-body">
+        <div class="flex items-center gap-3.5 mb-4">
+          <img src="/favicon.svg" alt="" class="w-11 h-11 drop-shadow" />
+          <div>
+            <div class="text-xl font-extrabold tracking-tight">MineDeck</div>
+            <div class="text-xs text-base-content/50">Панель управления Minecraft</div>
+          </div>
         </div>
+
+        <form id="login-form" class="hidden space-y-2">
+          <h2 class="text-lg font-bold mb-1">Вход</h2>
+          <label class="form-control w-full">
+            <div class="label py-1"><span class="label-text font-medium">Имя пользователя</span></div>
+            <input type="text" name="username" autocomplete="username" required class="input input-bordered w-full" />
+          </label>
+          <label class="form-control w-full">
+            <div class="label py-1"><span class="label-text font-medium">Пароль</span></div>
+            <input type="password" name="password" autocomplete="current-password" required class="input input-bordered w-full" />
+          </label>
+          <div class="text-error text-sm min-h-5" id="login-error"></div>
+          <button type="submit" class="btn btn-primary w-full">Войти</button>
+        </form>
+
+        <form id="setup-form" class="hidden space-y-2">
+          <h2 class="text-lg font-bold">Создание администратора</h2>
+          <p class="text-sm text-base-content/50 mb-1">Первый запуск. Придумайте логин и пароль для входа в панель.</p>
+          <label class="form-control w-full">
+            <div class="label py-1"><span class="label-text font-medium">Имя пользователя</span></div>
+            <input type="text" name="username" autocomplete="username" minlength="3" required class="input input-bordered w-full" />
+          </label>
+          <label class="form-control w-full">
+            <div class="label py-1"><span class="label-text font-medium">Пароль</span></div>
+            <input type="password" name="password" autocomplete="new-password" minlength="6" required class="input input-bordered w-full" />
+          </label>
+          <label class="form-control w-full">
+            <div class="label py-1"><span class="label-text font-medium">Повторите пароль</span></div>
+            <input type="password" name="password2" autocomplete="new-password" minlength="6" required class="input input-bordered w-full" />
+          </label>
+          <div class="text-error text-sm min-h-5" id="setup-error"></div>
+          <button type="submit" class="btn btn-primary w-full">Создать и войти</button>
+        </form>
       </div>
-
-      <form id="login-form" class="auth-form hidden">
-        <h2>Вход</h2>
-        <label>Имя пользователя
-          <input type="text" name="username" autocomplete="username" required />
-        </label>
-        <label>Пароль
-          <input type="password" name="password" autocomplete="current-password" required />
-        </label>
-        <div class="form-error" id="login-error"></div>
-        <button type="submit" class="btn btn-primary btn-block">Войти</button>
-      </form>
-
-      <form id="setup-form" class="auth-form hidden">
-        <h2>Создание администратора</h2>
-        <p class="muted">Первый запуск. Придумайте логин и пароль для входа в панель.</p>
-        <label>Имя пользователя
-          <input type="text" name="username" autocomplete="username" minlength="3" required />
-        </label>
-        <label>Пароль
-          <input type="password" name="password" autocomplete="new-password" minlength="6" required />
-        </label>
-        <label>Повторите пароль
-          <input type="password" name="password2" autocomplete="new-password" minlength="6" required />
-        </label>
-        <div class="form-error" id="setup-error"></div>
-        <button type="submit" class="btn btn-primary btn-block">Создать и войти</button>
-      </form>
     </div>
-    <div class="auth-footer">MineDeck • лёгкая панель для одного сервера</div>
+    <div class="text-xs text-base-content/40">MineDeck • лёгкая панель для одного сервера</div>
   </div>
 
   <!-- ================= APP SHELL ================= -->
-  <div id="app-shell" class="app-shell hidden">
-    <aside class="sidebar">
-      <div class="sidebar-brand">
-        <img src="/favicon.svg" alt="" class="brand-logo" />
-        <span>MineDeck</span>
+  <div id="app-shell" class="hidden h-screen flex">
+    <aside id="sidebar" class="w-60 shrink-0 bg-base-200/70 border-r border-base-300 flex flex-col p-3">
+      <div class="flex items-center gap-2.5 px-2 py-3 font-extrabold text-lg tracking-tight">
+        <img src="/favicon.svg" alt="" class="w-7 h-7" /> MineDeck
       </div>
-      <nav class="nav">
-        <a href="#/dashboard" data-view="dashboard" class="nav-item"><span class="nav-ico">▤</span> Панель</a>
-        <a href="#/files" data-view="files" class="nav-item"><span class="nav-ico">🗀</span> Файлы</a>
-        <a href="#/backups" data-view="backups" class="nav-item"><span class="nav-ico">🗄</span> Бэкапы</a>
-        <a href="#/timers" data-view="timers" class="nav-item"><span class="nav-ico">⏱</span> Таймеры</a>
-        <a href="#/settings" data-view="settings" class="nav-item"><span class="nav-ico">⚙</span> Настройки</a>
+      <nav class="flex flex-col gap-1 mt-1">
+        <a href="#/dashboard" data-view="dashboard" class="nav-item"><span class="w-5 text-center">▤</span> Панель</a>
+        <a href="#/files" data-view="files" class="nav-item"><span class="w-5 text-center">🗀</span> Файлы</a>
+        <a href="#/backups" data-view="backups" class="nav-item"><span class="w-5 text-center">🗄</span> Бэкапы</a>
+        <a href="#/timers" data-view="timers" class="nav-item"><span class="w-5 text-center">⏱</span> Таймеры</a>
+        <a href="#/settings" data-view="settings" class="nav-item"><span class="w-5 text-center">⚙</span> Настройки</a>
       </nav>
-      <div class="sidebar-foot">
-        <div class="sys-mini" id="sys-mini"></div>
-        <button id="logout-btn" class="btn btn-ghost btn-block">Выйти</button>
+      <div class="mt-auto flex flex-col gap-3">
+        <div id="sys-mini" class="text-[11px] text-base-content/40 px-2 leading-relaxed"></div>
+        <button id="logout-btn" class="btn btn-ghost btn-sm w-full">Выйти</button>
       </div>
     </aside>
+    <div id="sidebar-backdrop" class="hidden fixed inset-0 bg-black/50 z-30 lg:hidden"></div>
 
-    <div class="main">
-      <header class="topbar">
-        <div class="topbar-left">
-          <div class="status-pill" id="status-pill">
-            <span class="dot"></span><span id="status-text">—</span>
+    <div class="flex-1 flex flex-col overflow-hidden min-w-0">
+      <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b border-base-300 bg-base-200/40 backdrop-blur">
+        <div class="flex items-center gap-3 min-w-0">
+          <button id="sidebar-toggle" class="btn btn-ghost btn-sm btn-square lg:hidden">☰</button>
+          <div class="badge badge-lg gap-2 h-9 border-base-300 bg-base-100" id="status-pill">
+            <span class="status-dot" id="status-dot"></span><span id="status-text" class="font-semibold">—</span>
           </div>
-          <div class="uptime" id="uptime-text"></div>
+          <div id="uptime-text" class="text-xs text-base-content/50 hidden sm:block"></div>
         </div>
-        <div class="topbar-actions">
-          <button class="btn btn-success" id="btn-start">▶ Запуск</button>
-          <button class="btn btn-warn" id="btn-restart">⟳ Рестарт</button>
-          <button class="btn btn-danger" id="btn-stop">■ Стоп</button>
-          <button class="btn btn-ghost" id="btn-kill" title="Принудительно завершить">✕</button>
+        <div class="flex gap-2">
+          <button class="btn btn-success btn-sm" id="btn-start">▶ Запуск</button>
+          <button class="btn btn-warning btn-sm" id="btn-restart">⟳ Рестарт</button>
+          <button class="btn btn-error btn-sm" id="btn-stop">■ Стоп</button>
+          <button class="btn btn-ghost btn-sm btn-square" id="btn-kill" title="Принудительно завершить">✕</button>
         </div>
       </header>
 
-      <main class="content" id="content"><!-- views render here --></main>
+      <main class="p-4 sm:p-6 overflow-y-auto flex-1" id="content"></main>
     </div>
   </div>
 
   <!-- ================= TOASTS + MODAL ================= -->
-  <div id="toasts" class="toasts"></div>
+  <div id="toasts" class="toast toast-end z-[200]"></div>
   <div id="modal-root"></div>
 
   <script src="/js/api.js"></script>

@@ -92,8 +92,10 @@ journalctl -u minedeck -f      # логи панели
 
 ## 🧩 Технологии
 
-Node.js + Express + WebSocket (`ws`) на бэкенде, чистый HTML/CSS/JS без сборки на фронтенде.
-Зависимости минимальны: `express`, `express-session`, `ws`, `bcryptjs`, `multer`.
+Node.js + Express + WebSocket (`ws`) на бэкенде. Фронтенд — HTML/JS без сборки на сервере;
+интерфейс на **Tailwind CSS + daisyUI** (тёмная тема), собранный CSS (`public/css/app.css`)
+закоммичен, поэтому на сервере сборка не нужна и панель работает офлайн.
+Рантайм-зависимости минимальны: `express`, `express-session`, `ws`, `bcryptjs`, `multer`.
 
 ## 🧑‍💻 Запуск для разработки
 
@@ -101,7 +103,14 @@ Node.js + Express + WebSocket (`ws`) на бэкенде, чистый HTML/CSS/
 git clone https://github.com/denny4-user/minedeck.git
 cd minedeck
 npm install
-npm start        # http://localhost:8080
+npm start           # http://localhost:8080
+```
+
+Если правите интерфейс — пересоберите стили (Tailwind/daisyUI в devDependencies):
+
+```bash
+npm run build:css   # собрать public/css/app.css
+npm run watch:css   # пересобирать на лету при разработке
 ```
 
 ---
