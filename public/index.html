@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0f1216" />
+  <title>MineDeck — панель управления сервером</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <!-- ================= AUTH SCREEN ================= -->
+  <div id="auth-screen" class="auth-screen hidden">
+    <div class="auth-card">
+      <div class="brand">
+        <img src="/favicon.svg" alt="" class="brand-logo" />
+        <div>
+          <div class="brand-name">MineDeck</div>
+          <div class="brand-sub">Панель управления Minecraft</div>
+        </div>
+      </div>
+
+      <form id="login-form" class="auth-form hidden">
+        <h2>Вход</h2>
+        <label>Имя пользователя
+          <input type="text" name="username" autocomplete="username" required />
+        </label>
+        <label>Пароль
+          <input type="password" name="password" autocomplete="current-password" required />
+        </label>
+        <div class="form-error" id="login-error"></div>
+        <button type="submit" class="btn btn-primary btn-block">Войти</button>
+      </form>
+
+      <form id="setup-form" class="auth-form hidden">
+        <h2>Создание администратора</h2>
+        <p class="muted">Первый запуск. Придумайте логин и пароль для входа в панель.</p>
+        <label>Имя пользователя
+          <input type="text" name="username" autocomplete="username" minlength="3" required />
+        </label>
+        <label>Пароль
+          <input type="password" name="password" autocomplete="new-password" minlength="6" required />
+        </label>
+        <label>Повторите пароль
+          <input type="password" name="password2" autocomplete="new-password" minlength="6" required />
+        </label>
+        <div class="form-error" id="setup-error"></div>
+        <button type="submit" class="btn btn-primary btn-block">Создать и войти</button>
+      </form>
+    </div>
+    <div class="auth-footer">MineDeck • лёгкая панель для одного сервера</div>
+  </div>
+
+  <!-- ================= APP SHELL ================= -->
+  <div id="app-shell" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <img src="/favicon.svg" alt="" class="brand-logo" />
+        <span>MineDeck</span>
+      </div>
+      <nav class="nav">
+        <a href="#/dashboard" data-view="dashboard" class="nav-item"><span class="nav-ico">▤</span> Панель</a>
+        <a href="#/files" data-view="files" class="nav-item"><span class="nav-ico">🗀</span> Файлы</a>
+        <a href="#/backups" data-view="backups" class="nav-item"><span class="nav-ico">🗄</span> Бэкапы</a>
+        <a href="#/timers" data-view="timers" class="nav-item"><span class="nav-ico">⏱</span> Таймеры</a>
+        <a href="#/settings" data-view="settings" class="nav-item"><span class="nav-ico">⚙</span> Настройки</a>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="sys-mini" id="sys-mini"></div>
+        <button id="logout-btn" class="btn btn-ghost btn-block">Выйти</button>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <div class="status-pill" id="status-pill">
+            <span class="dot"></span><span id="status-text">—</span>
+          </div>
+          <div class="uptime" id="uptime-text"></div>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn btn-success" id="btn-start">▶ Запуск</button>
+          <button class="btn btn-warn" id="btn-restart">⟳ Рестарт</button>
+          <button class="btn btn-danger" id="btn-stop">■ Стоп</button>
+          <button class="btn btn-ghost" id="btn-kill" title="Принудительно завершить">✕</button>
+        </div>
+      </header>
+
+      <main class="content" id="content"><!-- views render here --></main>
+    </div>
+  </div>
+
+  <!-- ================= TOASTS + MODAL ================= -->
+  <div id="toasts" class="toasts"></div>
+  <div id="modal-root"></div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

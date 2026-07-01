@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="top" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6ee7a0"/>
+      <stop offset="1" stop-color="#3fbf6f"/>
+    </linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7a5230"/>
+      <stop offset="1" stop-color="#5a3a20"/>
+    </linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6a4526"/>
+      <stop offset="1" stop-color="#472c18"/>
+    </linearGradient>
+  </defs>
+  <!-- top face -->
+  <path d="M32 6 L58 19 L32 32 L6 19 Z" fill="url(#top)"/>
+  <!-- left face -->
+  <path d="M6 19 L32 32 L32 58 L6 45 Z" fill="url(#left)"/>
+  <!-- right face -->
+  <path d="M58 19 L32 32 L32 58 L58 45 Z" fill="url(#right)"/>
+  <!-- grass edge -->
+  <path d="M6 19 L32 32 L32 37 L6 24 Z" fill="#3fbf6f" opacity="0.85"/>
+  <path d="M58 19 L32 32 L32 37 L58 24 Z" fill="#2f9d59" opacity="0.85"/>
+</svg>
