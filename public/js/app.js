@@ -605,7 +605,7 @@ async function renderFiles(c) {
       <div class="dropzone-hint" id="f-drop-hint">${icon('upload')} Отпустите, чтобы загрузить в текущую папку</div>
       <div class="card-body p-4">
         <div class="relative mb-3">
-          <div class="flex items-center gap-2 flex-wrap">
+          <div class="flex items-center gap-2 flex-wrap" id="f-toolbar">
             <button class="btn btn-sm btn-ghost gap-1.5" id="f-up">${icon('up')} Вверх</button>
             <button class="btn btn-sm btn-ghost gap-1.5" id="f-refresh">${icon('refresh')} Обновить</button>
             <div class="flex-1"></div>
@@ -613,11 +613,14 @@ async function renderFiles(c) {
             <button class="btn btn-sm btn-ghost gap-1.5" id="f-newdir">${icon('folder-plus')} Папка</button>
             <button class="btn btn-sm gap-1.5" id="f-uploaddir">${icon('upload')} Папка</button>
             <button class="btn btn-sm btn-primary gap-1.5" id="f-upload">${icon('upload')} Файлы</button>
-            <div id="f-progress" class="radial-progress text-primary hidden shrink-0 text-[10px] font-semibold" style="--size:2.2rem;--thickness:3px;--value:0;" role="progressbar" title="Загрузка">0%</div>
+            <div id="f-progress" class="radial-progress text-primary hidden shrink-0 text-[10px] font-semibold cursor-pointer group" style="--size:2.2rem;--thickness:3px;--value:0;" role="button" title="Отменить загрузку">
+              <span class="f-prog-pct group-hover:hidden">0%</span>
+              <span class="f-prog-x hidden group-hover:flex text-error">${icon('x', 'w-4 h-4')}</span>
+            </div>
             <input type="file" id="f-file" multiple class="hidden" />
             <input type="file" id="f-filedir" webkitdirectory directory multiple class="hidden" />
           </div>
-          <div id="f-bulk" class="hidden absolute inset-0 items-center gap-2 rounded-lg bg-base-200 border border-base-300 px-3">
+          <div id="f-bulk" class="hidden absolute inset-0 items-center gap-2">
             <span class="text-sm font-medium px-1" id="f-bulk-count"></span>
             <div class="flex-1"></div>
             <button class="btn btn-sm btn-ghost gap-1.5" id="f-bulk-archive">${icon('archive')} Заархивировать</button>
@@ -648,6 +651,7 @@ async function renderFiles(c) {
   $('#f-bulk-archive').onclick = archiveSelected;
   $('#f-bulk-delete').onclick = deleteSelected;
   $('#f-bulk-clear').onclick = () => { Files.selected.clear(); $$('.f-check').forEach((c) => (c.checked = false)); updateBulkBar(); };
+  $('#f-progress').onclick = () => { if (Files.uploadAbort) Files.uploadAbort(); };
   setupDropzone($('#f-card'));
   loadFiles(Files.cwd);
 }
@@ -660,6 +664,8 @@ function updateBulkBar() {
   bar.classList.toggle('flex', n > 0);
   const cnt = $('#f-bulk-count');
   if (cnt) cnt.textContent = `Выбрано: ${n}`;
+  const tb = $('#f-toolbar');
+  if (tb) tb.classList.toggle('invisible', n > 0);
   const all = $('#f-selall');
   if (all) {
     const total = $$('.f-check').length;
@@ -755,19 +761,23 @@ async function uploadItems(items) {
     if (!prog) return;
     const pct = Math.round(Math.max(0, Math.min(1, frac)) * 100);
     prog.style.setProperty('--value', pct);
-    // At 100% the server may still be finishing — show a check when done via caller.
-    prog.textContent = pct + '%';
+    const pctEl = $('.f-prog-pct', prog);
+    if (pctEl) pctEl.textContent = pct + '%';
   };
   if (prog) { prog.classList.remove('hidden'); setProg(0); }
 
+  const handle = API.uploadXHR(Files.cwd, fd, setProg);
+  Files.uploadAbort = handle.abort;
   try {
-    const r = await API.uploadXHR(Files.cwd, fd, setProg);
+    const r = await handle.promise;
     setProg(1);
     toast(`Загружено: ${r.count != null ? r.count : (r.saved || []).length}`, 'success');
     loadFiles(Files.cwd);
   } catch (err) {
-    toastErr(err);
+    if (err.aborted) toast('Загрузка отменена', 'info');
+    else toastErr(err);
   } finally {
+    Files.uploadAbort = null;
     if (prog) setTimeout(() => prog.classList.add('hidden'), 400);
   }
 }

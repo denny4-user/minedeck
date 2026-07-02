@@ -53,20 +53,25 @@ const API = (() => {
     renameFile: (path, newName) => post('/api/files/rename', { path, newName }),
     upload: (path, formData) => { formData.append('path', path); return req('POST', '/api/files/upload', formData); },
     // Upload with real upload-progress via XHR. onProgress receives 0..1.
-    uploadXHR: (path, formData, onProgress) => new Promise((resolve, reject) => {
+    // Returns { promise, abort } so the caller can cancel the upload.
+    uploadXHR: (path, formData, onProgress) => {
       formData.append('path', path);
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/files/upload');
-      xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
-      xhr.onload = () => {
-        let data = null;
-        try { data = JSON.parse(xhr.responseText); } catch (_) {}
-        if (xhr.status >= 200 && xhr.status < 300) resolve(data || {});
-        else reject(new Error((data && data.error) || ('Ошибка ' + xhr.status)));
-      };
-      xhr.onerror = () => reject(new Error('Ошибка сети при загрузке.'));
-      xhr.send(formData);
-    }),
+      const promise = new Promise((resolve, reject) => {
+        xhr.open('POST', '/api/files/upload');
+        xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+        xhr.onload = () => {
+          let data = null;
+          try { data = JSON.parse(xhr.responseText); } catch (_) {}
+          if (xhr.status >= 200 && xhr.status < 300) resolve(data || {});
+          else reject(new Error((data && data.error) || ('Ошибка ' + xhr.status)));
+        };
+        xhr.onerror = () => reject(new Error('Ошибка сети при загрузке.'));
+        xhr.onabort = () => reject(Object.assign(new Error('Загрузка отменена.'), { aborted: true }));
+        xhr.send(formData);
+      });
+      return { promise, abort: () => xhr.abort() };
+    },
     downloadUrl: (path) => '/api/files/download?path=' + encodeURIComponent(path),
     archive: (dir, items, name) => post('/api/files/archive', { dir, items, name }),
     extract: (path) => post('/api/files/extract', { path }),
