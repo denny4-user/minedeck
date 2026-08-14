@@ -596,7 +596,9 @@ function updateDashStats(msg) {
 }
 
 /* ======================= Files ======================= */
-const Files = { cwd: '', selected: new Set() };
+const Files = { cwd: '', selected: new Set(), uploads: new Map(), _uploadRunning: false };
+const CHUNK_SIZE = 16 * 1024 * 1024;
+function b64utf8(s) { return btoa(unescape(encodeURIComponent(s || ''))); }
 const ARCHIVE_RE = /\.(zip|tar\.gz|tgz|tar|tar\.bz2|tbz2|tar\.xz|txz|gz)$/i;
 async function renderFiles(c) {
   c.innerHTML = `
@@ -613,10 +615,6 @@ async function renderFiles(c) {
             <button class="btn btn-sm btn-ghost gap-1.5" id="f-newdir">${icon('folder-plus')} Папка</button>
             <button class="btn btn-sm gap-1.5" id="f-uploaddir">${icon('upload')} Папка</button>
             <button class="btn btn-sm btn-primary gap-1.5" id="f-upload">${icon('upload')} Файлы</button>
-            <div id="f-progress" class="radial-progress text-primary hidden shrink-0 text-[10px] font-semibold cursor-pointer group" style="--size:2.2rem;--thickness:3px;--value:0;" role="button" title="Отменить загрузку">
-              <span class="f-prog-pct group-hover:hidden">0%</span>
-              <span class="f-prog-x hidden group-hover:flex text-error">${icon('x', 'w-4 h-4')}</span>
-            </div>
             <input type="file" id="f-file" multiple class="hidden" />
             <input type="file" id="f-filedir" webkitdirectory directory multiple class="hidden" />
           </div>
@@ -631,6 +629,7 @@ async function renderFiles(c) {
         <div class="breadcrumbs text-sm py-0 mb-2" id="f-crumbs"><ul></ul></div>
         <div class="overflow-x-auto" id="f-list"></div>
       </div>
+      <div id="f-uploads" class="hidden absolute right-4 bottom-4 z-20 w-72 max-h-72 flex flex-col bg-base-100 border border-base-300 rounded-box shadow-2xl overflow-hidden"></div>
     </div>`;
   $('#f-refresh').onclick = () => loadFiles(Files.cwd);
   $('#f-up').onclick = () => { const parts = Files.cwd.split('/').filter(Boolean); parts.pop(); loadFiles(parts.join('/')); };
@@ -651,7 +650,7 @@ async function renderFiles(c) {
   $('#f-bulk-archive').onclick = archiveSelected;
   $('#f-bulk-delete').onclick = deleteSelected;
   $('#f-bulk-clear').onclick = () => { Files.selected.clear(); $$('.f-check').forEach((c) => (c.checked = false)); updateBulkBar(); };
-  $('#f-progress').onclick = () => { if (Files.uploadAbort) Files.uploadAbort(); };
+  renderUploadQueue();
   setupDropzone($('#f-card'));
   loadFiles(Files.cwd);
 }
@@ -750,36 +749,154 @@ function walkEntry(entry, prefix, out) {
   });
 }
 
-async function uploadItems(items) {
-  const fd = new FormData();
-  const relpaths = [];
-  for (const it of items) { fd.append('files', it.file, it.file.name); relpaths.push(it.path); }
-  fd.append('relpaths', JSON.stringify(relpaths));
-
-  const prog = $('#f-progress');
-  const setProg = (frac) => {
-    if (!prog) return;
-    const pct = Math.round(Math.max(0, Math.min(1, frac)) * 100);
-    prog.style.setProperty('--value', pct);
-    const pctEl = $('.f-prog-pct', prog);
-    if (pctEl) pctEl.textContent = pct + '%';
-  };
-  if (prog) { prog.classList.remove('hidden'); setProg(0); }
-
-  const handle = API.uploadXHR(Files.cwd, fd, setProg);
-  Files.uploadAbort = handle.abort;
-  try {
-    const r = await handle.promise;
-    setProg(1);
-    toast(`Загружено: ${r.count != null ? r.count : (r.saved || []).length}`, 'success');
-    loadFiles(Files.cwd);
-  } catch (err) {
-    if (err.aborted) toast('Загрузка отменена', 'info');
-    else toastErr(err);
-  } finally {
-    Files.uploadAbort = null;
-    if (prog) setTimeout(() => prog.classList.add('hidden'), 400);
+// Enqueue items ({file, path}) for chunked upload; each file uploads
+// independently so any one can be cancelled without affecting the others.
+function uploadItems(items) {
+  const destCwd = Files.cwd;
+  for (const it of items) {
+    const id = 'up' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    Files.uploads.set(id, { id, file: it.file, relpath: it.path, dest: destCwd, status: 'pending', progress: 0, canceled: false, xhr: null, uploadId: null, error: '' });
   }
+  renderUploadQueue();
+  processUploadQueue();
+}
+
+async function processUploadQueue() {
+  if (Files._uploadRunning) return;
+  Files._uploadRunning = true;
+  try {
+    for (;;) {
+      const entry = [...Files.uploads.values()].find((e) => e.status === 'pending' && !e.canceled);
+      if (!entry) break;
+      entry.status = 'uploading';
+      renderUploadQueue();
+      try {
+        await uploadFileChunked(entry);
+        Files.uploads.delete(entry.id);
+        renderUploadQueue();
+        if (Files.cwd === entry.dest) loadFiles(Files.cwd);
+      } catch (err) {
+        if (err && err.canceled) { Files.uploads.delete(entry.id); }
+        else { entry.status = 'error'; entry.error = (err && err.message) || 'Ошибка'; toast(`Ошибка загрузки «${fmtUploadName(entry.relpath)}»: ${entry.error}`, 'error'); }
+        renderUploadQueue();
+      }
+      for (const e of [...Files.uploads.values()]) if (e.canceled && e.status !== 'uploading') Files.uploads.delete(e.id);
+    }
+  } finally {
+    Files._uploadRunning = false;
+    renderUploadQueue();
+  }
+}
+
+async function uploadFileChunked(entry) {
+  const file = entry.file;
+  const size = file.size;
+  const total = Math.max(1, Math.ceil(size / CHUNK_SIZE));
+  const uploadId = ('u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12)).replace(/[^a-zA-Z0-9_]/g, '').slice(0, 40);
+  entry.uploadId = uploadId;
+  for (let i = 0; i < total; i++) {
+    if (entry.canceled) throw { canceled: true };
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(size, start + CHUNK_SIZE);
+    const blob = file.slice(start, end);
+    let attempt = 0;
+    for (;;) {
+      try {
+        await sendChunk(entry, uploadId, i, total, start, blob, (loaded) => {
+          entry.progress = Math.min(1, (start + loaded) / (size || 1));
+          updateUploadRow(entry);
+        });
+        break;
+      } catch (err) {
+        if (err && err.canceled) throw err;
+        if (++attempt >= 3) throw err;
+        await new Promise((r) => setTimeout(r, 800 * attempt));
+      }
+    }
+    entry.progress = Math.min(1, end / (size || 1));
+    updateUploadRow(entry);
+  }
+}
+
+function sendChunk(entry, uploadId, index, total, offset, blob, onProgress) {
+  return new Promise((resolve, reject) => {
+    if (entry.canceled) return reject({ canceled: true });
+    const xhr = new XMLHttpRequest();
+    entry.xhr = xhr;
+    xhr.open('POST', '/api/files/upload-chunk');
+    xhr.setRequestHeader('x-upload-id', uploadId);
+    xhr.setRequestHeader('x-chunk-index', String(index));
+    xhr.setRequestHeader('x-total-chunks', String(total));
+    xhr.setRequestHeader('x-offset', String(offset));
+    xhr.setRequestHeader('x-dest', b64utf8(entry.dest));
+    xhr.setRequestHeader('x-rel-path', b64utf8(entry.relpath));
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded); };
+    xhr.onload = () => {
+      entry.xhr = null;
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else { let d = null; try { d = JSON.parse(xhr.responseText); } catch (_) {} reject(new Error((d && d.error) || ('Ошибка ' + xhr.status))); }
+    };
+    xhr.onerror = () => { entry.xhr = null; reject(new Error('Ошибка сети')); };
+    xhr.onabort = () => { entry.xhr = null; reject({ canceled: true }); };
+    xhr.send(blob);
+  });
+}
+
+function cancelUpload(id) {
+  const entry = Files.uploads.get(id);
+  if (!entry) return;
+  entry.canceled = true;
+  if (entry.xhr) { try { entry.xhr.abort(); } catch (_) {} }
+  if (entry.uploadId) API.uploadAbort(entry.uploadId).catch(() => {});
+  if (entry.status !== 'uploading') Files.uploads.delete(id);
+  renderUploadQueue();
+}
+
+function fmtUploadName(relpath) { return String(relpath).split('/').pop(); }
+
+function uploadRowHtml(e) {
+  const pct = Math.round((e.progress || 0) * 100);
+  const status = e.status === 'error' ? `<span class="text-error" title="${esc(e.error)}">ошибка</span>`
+    : e.status === 'pending' ? 'в очереди' : pct + '%';
+  return `<div class="flex items-center gap-2" data-row="${e.id}">
+    <div class="flex-1 min-w-0">
+      <div class="text-xs truncate" title="${esc(e.relpath)}">${esc(fmtUploadName(e.relpath))}</div>
+      <progress class="progress ${e.status === 'error' ? 'progress-error' : 'progress-success'} h-1.5 w-full" value="${pct}" max="100"></progress>
+    </div>
+    <span class="text-[10px] text-base-content/50 w-12 text-right shrink-0" data-pct="${e.id}">${status}</span>
+    <button class="btn btn-ghost btn-xs btn-square shrink-0" data-cancel="${e.id}" title="Отменить">${icon('x')}</button>
+  </div>`;
+}
+
+function renderUploadQueue() {
+  const panel = $('#f-uploads');
+  if (!panel) return;
+  const list = [...Files.uploads.values()];
+  if (!list.length) { panel.classList.add('hidden'); panel.innerHTML = ''; return; }
+  panel.classList.remove('hidden');
+  const active = list.filter((e) => e.status === 'uploading' || e.status === 'pending').length;
+  panel.innerHTML = `
+    <div class="flex items-center justify-between px-3 py-2 border-b border-base-300 text-xs font-semibold">
+      <span>${active ? `Загрузка (${active})` : 'Загрузки'}</span>
+      <button class="btn btn-ghost btn-xs btn-square" id="uq-cancel-all" title="Отменить все">${icon('x')}</button>
+    </div>
+    <div class="overflow-y-auto p-2 space-y-2" style="max-height:14rem">${list.map(uploadRowHtml).join('')}</div>`;
+  $('#uq-cancel-all', panel).onclick = () => [...Files.uploads.keys()].forEach(cancelUpload);
+  list.forEach((e) => {
+    const btn = panel.querySelector(`[data-cancel="${e.id}"]`);
+    if (btn) btn.onclick = () => cancelUpload(e.id);
+  });
+}
+
+function updateUploadRow(e) {
+  const panel = $('#f-uploads');
+  if (!panel) return;
+  const row = panel.querySelector(`[data-row="${e.id}"]`);
+  if (!row) { renderUploadQueue(); return; }
+  const pct = Math.round((e.progress || 0) * 100);
+  const bar = row.querySelector('progress'); if (bar) bar.value = pct;
+  const pctEl = panel.querySelector(`[data-pct="${e.id}"]`);
+  if (pctEl && e.status === 'uploading') pctEl.textContent = pct + '%';
 }
 async function loadFiles(path) {
   try {

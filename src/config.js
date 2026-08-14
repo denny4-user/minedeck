@@ -61,7 +61,7 @@ function defaultConfig() {
     backups: {
       directory: path.join(DATA_DIR, 'backups'),
       maxKeep: 10,
-      exclude: ['backups', 'cache', 'logs', 'crash-reports'],
+      exclude: ['backups', 'cache', 'logs', 'crash-reports', '.minedeck-uploads'],
     },
     schedule: {
       tasks: [],

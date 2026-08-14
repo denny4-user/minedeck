@@ -181,4 +181,63 @@ router.post('/extract', async (req, res) => {
   }
 });
 
+// ---- Chunked upload (for large files, resumable per chunk) ----------------
+const UPLOAD_TMP = '.minedeck-uploads';
+function uploadTmpDir() {
+  const dir = path.join(files.baseDir(), UPLOAD_TMP);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+const MAX_CHUNK = 64 * 1024 * 1024; // safety cap (client uses 16 MB chunks)
+
+router.post('/upload-chunk', (req, res) => {
+  const uploadId = String(req.headers['x-upload-id'] || '');
+  const index = parseInt(req.headers['x-chunk-index'], 10);
+  const total = parseInt(req.headers['x-total-chunks'], 10);
+  const offset = parseInt(req.headers['x-offset'], 10) || 0;
+  const decode = (h) => { try { return Buffer.from(String(req.headers[h] || ''), 'base64').toString('utf8'); } catch (_) { return ''; } };
+  const dest = decode('x-dest');
+  const relPath = decode('x-rel-path');
+
+  if (!/^[a-zA-Z0-9_]{6,64}$/.test(uploadId) || !Number.isInteger(index) || !Number.isInteger(total) || index < 0 || total < 1) {
+    return res.status(400).json({ error: 'Некорректные параметры чанка.' });
+  }
+  let targetAbs;
+  try {
+    files.resolveSafe(dest);
+    targetAbs = files.resolveSafe(path.join(dest, relPath));
+  } catch (err) { return res.status(err.status || 400).json({ error: err.message }); }
+
+  const tmpPath = path.join(uploadTmpDir(), uploadId + '.part');
+  const parts = [];
+  let size = 0;
+  let over = false;
+  req.on('data', (d) => { size += d.length; if (size <= MAX_CHUNK) parts.push(d); else over = true; });
+  req.on('error', () => { if (!res.headersSent) res.status(400).json({ error: 'Ошибка приёма чанка.' }); });
+  req.on('end', () => {
+    if (res.headersSent) return;
+    if (over) return res.status(413).json({ error: 'Чанк слишком большой.' });
+    try {
+      const buf = Buffer.concat(parts);
+      const fd = fs.openSync(tmpPath, index === 0 ? 'w' : 'r+');
+      try { fs.writeSync(fd, buf, 0, buf.length, offset); } finally { fs.closeSync(fd); }
+      if (index === total - 1) {
+        fs.mkdirSync(path.dirname(targetAbs), { recursive: true });
+        fs.renameSync(tmpPath, targetAbs); // same filesystem -> atomic, no copy
+        return res.json({ ok: true, done: true });
+      }
+      res.json({ ok: true, done: false });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+router.post('/upload-abort', (req, res) => {
+  const uploadId = String((req.body || {}).uploadId || '');
+  if (!/^[a-zA-Z0-9_]{6,64}$/.test(uploadId)) return res.status(400).json({ error: 'Некорректный id.' });
+  try { fs.unlinkSync(path.join(uploadTmpDir(), uploadId + '.part')); } catch (_) {}
+  res.json({ ok: true });
+});
+
 module.exports = router;

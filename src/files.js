@@ -45,7 +45,7 @@ async function list(relPath) {
     err.status = 400;
     throw err;
   }
-  const names = await fsp.readdir(dir);
+  const names = (await fsp.readdir(dir)).filter((n) => n !== '.minedeck-uploads');
   const entries = await Promise.all(
     names.map(async (name) => {
       const abs = path.join(dir, name);

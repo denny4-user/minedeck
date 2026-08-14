@@ -16,6 +16,9 @@ const FileStore = require('./sessionStore');
 
 const app = express();
 const server = http.createServer(app);
+// Allow very long uploads: Node's default requestTimeout (5 min) would abort a
+// large chunked/streamed upload. Chunks are small, but disable it to be safe.
+server.requestTimeout = 0;
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '6mb' }));
