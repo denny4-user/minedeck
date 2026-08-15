@@ -696,12 +696,32 @@ async function deleteSelected() {
   loadFiles(Files.cwd);
 }
 async function extractEntry(path) {
+  let start;
   try {
-    toast('Распаковка…', 'info');
-    await API.extract(path);
-    toast('Распаковано', 'success');
-    loadFiles(Files.cwd);
-  } catch (err) { toastErr(err); }
+    start = await API.extract(path);
+  } catch (err) { toastErr(err); return; }
+
+  const m = openModal({
+    title: 'Распаковка архива',
+    body: `<p class="text-sm text-base-content/60 mb-3">Архив распаковывается на сервере. Это может занять время для больших файлов — можно закрыть окно, распаковка продолжится.</p>
+      <progress id="ex-bar" class="progress progress-success w-full" ${start.total ? `value="0" max="${start.total}"` : ''}></progress>
+      <div id="ex-text" class="text-xs text-base-content/50 mt-2">Подготовка…</div>`,
+  });
+  const bar = $('#ex-bar', m.root), txt = $('#ex-text', m.root);
+  let done = false;
+  const poll = setInterval(async () => {
+    let s;
+    try { s = await API.extractStatus(start.jobId); }
+    catch (err) {
+      // 404 = job already finished & pruned; treat as done.
+      if (err.status === 404 && !done) { done = true; clearInterval(poll); m.close(); toast('Распаковано', 'success'); loadFiles(Files.cwd); }
+      return;
+    }
+    if (bar) { if (s.total) { bar.value = s.extracted; bar.max = s.total; } }
+    if (txt) txt.textContent = s.total ? `Распаковано ${s.extracted} из ${s.total} файлов` : `Распаковано файлов: ${s.extracted || 0}`;
+    if (s.status === 'done') { done = true; clearInterval(poll); m.close(); toast('Распаковано', 'success'); loadFiles(Files.cwd); }
+    else if (s.status === 'error') { done = true; clearInterval(poll); m.close(); toast('Ошибка распаковки: ' + (s.error || ''), 'error'); loadFiles(Files.cwd); }
+  }, 1000);
 }
 
 function setupDropzone(card) {

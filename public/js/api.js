@@ -55,6 +55,7 @@ const API = (() => {
     downloadUrl: (path) => '/api/files/download?path=' + encodeURIComponent(path),
     archive: (dir, items, name) => post('/api/files/archive', { dir, items, name }),
     extract: (path) => post('/api/files/extract', { path }),
+    extractStatus: (id) => get('/api/files/extract-status?id=' + encodeURIComponent(id)),
     // backups
     backups: () => get('/api/backups'),
     createBackup: (label) => post('/api/backups/create', { label }),
