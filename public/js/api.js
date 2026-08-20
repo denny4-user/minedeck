@@ -90,8 +90,9 @@ const API = (() => {
     firewall: () => get('/api/firewall'),
     fwEnable: () => post('/api/firewall/enable'),
     fwDisable: () => post('/api/firewall/disable'),
-    fwAllow: (port, proto) => post('/api/firewall/allow', { port, proto }),
-    fwDeny: (port, proto) => post('/api/firewall/deny', { port, proto }),
-    fwDelete: (port, proto, action) => post('/api/firewall/delete', { port, proto, action }),
+    fwClientIp: () => get('/api/firewall/client-ip'),
+    fwAllow: (port, proto, from) => post('/api/firewall/allow', { port, proto, from }),
+    fwDeny: (port, proto, from) => post('/api/firewall/deny', { port, proto, from }),
+    fwDelete: (port, proto, action, from) => post('/api/firewall/delete', { port, proto, action, from }),
   };
 })();

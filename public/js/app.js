@@ -1566,11 +1566,22 @@ async function renderFirewall(body) {
         ${sectionTitle(
           `Фаервол (ufw) <span class="badge ${fw.active ? 'badge-success' : 'badge-error'} badge-lg align-middle ml-1">${fw.active ? 'активен' : 'выключен'}</span>`,
           fw.active ? '<button class="btn btn-error btn-sm" id="fw-toggle">Выключить</button>' : '<button class="btn btn-success btn-sm" id="fw-toggle">Включить</button>')}
-        <div class="flex items-center gap-2 flex-wrap mb-4">
-          <input id="fw-port" type="number" placeholder="Порт (напр. 25565)" class="input input-bordered input-sm w-52" />
-          <select id="fw-proto" class="select select-bordered select-sm"><option value="both">tcp+udp</option><option value="tcp">tcp</option><option value="udp">udp</option></select>
-          <button class="btn btn-success btn-sm" id="fw-allow">Разрешить</button>
-          <button class="btn btn-error btn-sm" id="fw-deny">Запретить</button>
+        <div class="mb-4">
+          <div class="flex items-center gap-2 flex-wrap">
+            <input id="fw-port" type="number" placeholder="Порт (напр. 25565)" class="input input-bordered input-sm w-52" />
+            <select id="fw-proto" class="select select-bordered select-sm"><option value="both">tcp+udp</option><option value="tcp">tcp</option><option value="udp">udp</option></select>
+            <button class="btn btn-success btn-sm" id="fw-allow">Разрешить</button>
+            <button class="btn btn-error btn-sm" id="fw-deny">Запретить</button>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap mt-2">
+            <input id="fw-from" placeholder="Источник: любой" class="input input-bordered input-sm w-80 font-mono" />
+            <button class="btn btn-ghost btn-sm" id="fw-my-ip">Мой IP</button>
+            <button class="btn btn-ghost btn-sm" id="fw-any">Любой</button>
+          </div>
+          <div class="text-xs text-base-content/50 mt-1">
+            Пусто — подключение с любого адреса. Укажите IP или подсеть (напр. <span class="font-mono">203.0.113.5</span>, <span class="font-mono">10.0.0.0/8</span>),
+            чтобы порт был открыт только для них — так порт 25565 виден только вашему прокси, а не сканерам. Несколько адресов — через запятую (создастся отдельное правило на каждый).
+          </div>
         </div>
         <div class="overflow-x-auto" id="fw-rules"></div>
         <div class="alert alert-warning mt-4 py-2 text-sm">
@@ -1583,13 +1594,21 @@ async function renderFirewall(body) {
       catch (err) { toastErr(err); }
     };
     const doRule = async (fn) => {
-      const port = $('#fw-port').value, proto = $('#fw-proto').value;
+      const port = $('#fw-port').value, proto = $('#fw-proto').value, from = $('#fw-from').value.trim();
       if (!port) { toast('Укажите порт', 'error'); return; }
-      try { await fn(port, proto); toast('Правило применено', 'success'); renderFirewall(body); }
+      try { await fn(port, proto, from); toast('Правило применено', 'success'); renderFirewall(body); }
       catch (err) { toastErr(err); }
     };
     $('#fw-allow').onclick = () => doRule(API.fwAllow);
     $('#fw-deny').onclick = () => doRule(API.fwDeny);
+    $('#fw-any').onclick = () => { $('#fw-from').value = ''; };
+    $('#fw-my-ip').onclick = async () => {
+      try {
+        const { ip } = await API.fwClientIp();
+        if (!ip) { toast('Не удалось определить ваш адрес', 'error'); return; }
+        $('#fw-from').value = ip;
+      } catch (err) { toastErr(err); }
+    };
   } catch (err) { toastErr(err); }
 }
 function renderFwRules(rules) {
@@ -1601,15 +1620,15 @@ function renderFwRules(rules) {
       <td class="font-mono">${esc(r.to)}</td>
       <td><span class="badge ${r.action === 'ALLOW' ? 'badge-success' : 'badge-error'} badge-sm">${r.action}</span></td>
       <td class="text-base-content/50">${esc(r.direction)}</td>
-      <td class="text-base-content/50">${esc(r.from)}</td>
-      <td class="text-right"><button class="btn btn-error btn-xs" data-to="${esc(r.to)}" data-act="${r.action}">Удалить</button></td>
+      <td class="${r.restricted ? 'font-mono' : 'text-base-content/50'}">${esc(r.from)}</td>
+      <td class="text-right"><button class="btn btn-error btn-xs" data-to="${esc(r.to)}" data-act="${r.action}" data-from="${esc(r.restricted ? r.from : 'any')}">Удалить</button></td>
     </tr>`).join('')
   }</tbody></table>`;
   $$('[data-to]', box).forEach((btn) => btn.onclick = async () => {
     const m = btn.dataset.to.match(/^(\d+)(?:\/(tcp|udp))?/);
     if (!m) return;
     const port = m[1], proto = m[2] || 'both', action = btn.dataset.act === 'DENY' ? 'deny' : 'allow';
-    try { await API.fwDelete(port, proto, action); toast('Правило удалено', 'success'); renderFirewall($('#settings-body')); }
+    try { await API.fwDelete(port, proto, action, btn.dataset.from); toast('Правило удалено', 'success'); renderFirewall($('#settings-body')); }
     catch (err) { toastErr(err); }
   });
 }
