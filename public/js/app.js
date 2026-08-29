@@ -233,6 +233,14 @@ function enterApp() {
   $('#sidebar-toggle').onclick = () => { sb.classList.toggle('open'); bd.classList.toggle('hidden'); };
   bd.onclick = closeSb;
   $$('.nav-item').forEach((a) => a.addEventListener('click', closeSb));
+  // Clicking "Файлы" while already viewing it resets to the root folder
+  // (same-hash clicks don't fire hashchange, so router() wouldn't re-run).
+  // Switching to Файлы from any other section still resumes the last folder,
+  // since Files.cwd only changes here or via in-page navigation.
+  const filesNav = $('.nav-item[data-view="files"]');
+  if (filesNav) filesNav.addEventListener('click', () => {
+    if (State.view === 'files') { Files.cwd = ''; loadFiles(''); }
+  });
 
   connectWS();
   bindTopbar();
@@ -1467,29 +1475,55 @@ async function renderServerSettings(body) {
           ${field('Команда остановки', `<input id="s-stopcmd" class="${INPUT}" value="${esc(s.stopCommand)}" />`)}
           ${field('Доп. флаги JVM', `<input id="s-flags" class="${INPUT}" value="${esc(s.jvmFlags)}" placeholder="-Dfile.encoding=UTF-8" />`)}
         </div>
-        ${field('Своя команда запуска (переопределяет всё выше)', `<input id="s-custom" class="${INPUT} font-mono" value="${esc(s.customCommand)}" placeholder="оставьте пустым для стандартного запуска" />`)}
         <div class="mt-2 rounded-box border border-base-300 px-4 divide-y divide-base-300/50">
           ${toggleRow('Флаги Aikar', 'оптимизация сборки мусора (GC)', 's-aikar', s.useAikarFlags)}
           ${toggleRow('Автозапуск', 'запускать сервер при старте панели', 's-autostart', s.autoStart)}
           ${toggleRow('Авто-перезапуск', 'перезапускать при падении', 's-autorestart', s.autoRestart)}
         </div>
-        ${field('Предпросмотр команды запуска', `<div class="code-preview" id="s-preview">${esc(data.commandPreview)}</div>`)}
-        <div class="flex items-center gap-3 flex-wrap mt-2">
+        <div class="mt-4">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="label-text font-medium text-sm">Команда запуска</span>
+            <button type="button" class="btn btn-ghost btn-xs gap-1" id="s-preview-reset">${icon('rotate-ccw', 'w-3.5 h-3.5')} Сбросить</button>
+          </div>
+          <textarea id="s-preview" class="code-preview-input" rows="2" spellcheck="false">${esc(data.commandPreview)}</textarea>
+          <div class="label-text-alt text-base-content/45 leading-snug mt-1.5">Можно отредактировать напрямую — тогда сервер будет запускаться именно этой командой вместо стандартной (собранной из полей выше). «Сбросить» отменит правки и вернёт автоматически сформированную команду.</div>
+        </div>
+        <div class="flex items-center gap-3 flex-wrap mt-4">
           <button class="btn btn-primary" id="s-save">Сохранить</button>
           <span class="badge ${st.eula ? 'badge-success' : 'badge-error'} badge-lg">EULA: ${st.eula ? 'принято' : 'не принято'}</span>
           ${st.eula ? '' : '<button class="btn btn-warning btn-sm" id="s-eula">Принять EULA</button>'}
         </div>
       </div></div>`;
+
+    // The preview textarea doubles as the custom-command override: editing it
+    // marks the launch command as overridden; "Сбросить" clears the override
+    // and shows the auto-generated command (computed server-side, live, from
+    // the current — possibly unsaved — form field values).
+    let previewOverridden = !!(s.customCommand && s.customCommand.trim());
+    const previewEl = $('#s-preview');
+    previewEl.addEventListener('input', () => { previewOverridden = true; });
+
+    const currentFormFields = () => ({
+      directory: $('#s-dir').value, jar: $('#s-jar').value, javaPath: $('#s-java').value,
+      minRamMB: $('#s-minram').value, maxRamMB: $('#s-maxram').value, cpuCores: $('#s-cpucores').value,
+      stopCommand: $('#s-stopcmd').value, jvmFlags: $('#s-flags').value,
+      useAikarFlags: $('#s-aikar').checked, autoStart: $('#s-autostart').checked, autoRestart: $('#s-autorestart').checked,
+    });
+
+    $('#s-preview-reset').onclick = async () => {
+      try {
+        const r = await API.previewServerCommand({ ...currentFormFields(), customCommand: '' });
+        previewEl.value = r.commandPreview;
+        previewOverridden = false;
+        toast('Команда сброшена до автоматической', 'info');
+      } catch (err) { toastErr(err); }
+    };
+
     $('#s-save').onclick = async () => {
-      const payload = {
-        directory: $('#s-dir').value, jar: $('#s-jar').value, javaPath: $('#s-java').value,
-        minRamMB: $('#s-minram').value, maxRamMB: $('#s-maxram').value, cpuCores: $('#s-cpucores').value,
-        stopCommand: $('#s-stopcmd').value, jvmFlags: $('#s-flags').value, customCommand: $('#s-custom').value,
-        useAikarFlags: $('#s-aikar').checked, autoStart: $('#s-autostart').checked, autoRestart: $('#s-autorestart').checked,
-      };
+      const payload = { ...currentFormFields(), customCommand: previewOverridden ? previewEl.value : '' };
       try {
         const r = await API.saveServerSettings(payload);
-        $('#s-preview').textContent = r.commandPreview;
+        previewEl.value = r.commandPreview;
         toast('Настройки сервера сохранены', 'success');
       } catch (err) { toastErr(err); }
     };

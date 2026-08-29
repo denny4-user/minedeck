@@ -79,6 +79,14 @@
     background: #0a0d11;
     border: 1px solid theme('colors.base-300');
   }
+  /* Editable variant of .code-preview (launch-command box) */
+  .code-preview-input {
+    @apply w-full rounded-lg p-3 font-mono text-xs text-base-content/80 outline-none resize-y;
+    background: #0a0d11;
+    border: 1px solid theme('colors.base-300');
+    min-height: 3.4rem;
+  }
+  .code-preview-input:focus { @apply border-primary; }
 
   /* Inline Lucide icons */
   .mi { display: inline-block; width: 1.15em; height: 1.15em; vertical-align: -0.18em; flex-shrink: 0; }

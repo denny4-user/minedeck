@@ -71,6 +71,7 @@ const API = (() => {
     // settings
     settings: () => get('/api/settings'),
     saveServerSettings: (s) => post('/api/settings/server', s),
+    previewServerCommand: (s) => post('/api/settings/server/preview', s),
     savePanelSettings: (s) => post('/api/settings/panel', s),
     properties: () => get('/api/settings/properties'),
     saveProperties: (properties) => post('/api/settings/properties', { properties }),

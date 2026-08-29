@@ -28,9 +28,9 @@ router.get('/', (req, res) => {
   res.json({ ...publicConfig(), commandPreview: mcserver.describeCommand() });
 });
 
-router.post('/server', (req, res) => {
-  const b = req.body || {};
-  const cur = config.get().server;
+// Shared normalization between the real save and the dry-run preview below,
+// so both apply identical clamping/validation rules.
+function normalizeServerPatch(b, cur) {
   const min = b.minRamMB != null ? Math.max(128, parseInt(b.minRamMB, 10) || cur.minRamMB) : cur.minRamMB;
   let max = b.maxRamMB != null ? Math.max(256, parseInt(b.maxRamMB, 10) || cur.maxRamMB) : cur.maxRamMB;
   if (max < min) max = min;
@@ -39,25 +39,35 @@ router.post('/server', (req, res) => {
     ? Math.max(0, Math.min(os.cpus().length, parseInt(b.cpuCores, 10) || 0))
     : cur.cpuCores;
 
-  const patch = {
-    server: {
-      directory: typeof b.directory === 'string' && b.directory.trim() ? b.directory.trim() : cur.directory,
-      jar: typeof b.jar === 'string' && b.jar.trim() ? b.jar.trim() : cur.jar,
-      javaPath: typeof b.javaPath === 'string' && b.javaPath.trim() ? b.javaPath.trim() : cur.javaPath,
-      minRamMB: min,
-      maxRamMB: max,
-      cpuCores,
-      jvmFlags: typeof b.jvmFlags === 'string' ? b.jvmFlags : cur.jvmFlags,
-      useAikarFlags: b.useAikarFlags != null ? !!b.useAikarFlags : cur.useAikarFlags,
-      customCommand: typeof b.customCommand === 'string' ? b.customCommand : cur.customCommand,
-      stopCommand: typeof b.stopCommand === 'string' && b.stopCommand.trim() ? b.stopCommand.trim() : cur.stopCommand,
-      stopTimeoutSec: b.stopTimeoutSec != null ? Math.max(5, parseInt(b.stopTimeoutSec, 10) || cur.stopTimeoutSec) : cur.stopTimeoutSec,
-      autoStart: b.autoStart != null ? !!b.autoStart : cur.autoStart,
-      autoRestart: b.autoRestart != null ? !!b.autoRestart : cur.autoRestart,
-    },
+  return {
+    directory: typeof b.directory === 'string' && b.directory.trim() ? b.directory.trim() : cur.directory,
+    jar: typeof b.jar === 'string' && b.jar.trim() ? b.jar.trim() : cur.jar,
+    javaPath: typeof b.javaPath === 'string' && b.javaPath.trim() ? b.javaPath.trim() : cur.javaPath,
+    minRamMB: min,
+    maxRamMB: max,
+    cpuCores,
+    jvmFlags: typeof b.jvmFlags === 'string' ? b.jvmFlags : cur.jvmFlags,
+    useAikarFlags: b.useAikarFlags != null ? !!b.useAikarFlags : cur.useAikarFlags,
+    customCommand: typeof b.customCommand === 'string' ? b.customCommand : cur.customCommand,
+    stopCommand: typeof b.stopCommand === 'string' && b.stopCommand.trim() ? b.stopCommand.trim() : cur.stopCommand,
+    stopTimeoutSec: b.stopTimeoutSec != null ? Math.max(5, parseInt(b.stopTimeoutSec, 10) || cur.stopTimeoutSec) : cur.stopTimeoutSec,
+    autoStart: b.autoStart != null ? !!b.autoStart : cur.autoStart,
+    autoRestart: b.autoRestart != null ? !!b.autoRestart : cur.autoRestart,
   };
+}
+
+router.post('/server', (req, res) => {
+  const patch = { server: normalizeServerPatch(req.body || {}, config.get().server) };
   config.update(patch);
   res.json({ ok: true, server: config.get().server, commandPreview: mcserver.describeCommand() });
+});
+
+// Dry-run: compute the resulting launch command for hypothetical (unsaved)
+// field values, without persisting anything. Used by the "reset preview to
+// the auto-generated command" button in Settings.
+router.post('/server/preview', (req, res) => {
+  const hypothetical = normalizeServerPatch(req.body || {}, config.get().server);
+  res.json({ commandPreview: mcserver.describeCommand(hypothetical) });
 });
 
 router.post('/panel', (req, res) => {

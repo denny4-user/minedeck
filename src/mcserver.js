@@ -76,8 +76,8 @@ class MCServer extends EventEmitter {
     return this.history;
   }
 
-  buildCommand() {
-    const s = config.get().server;
+  buildCommand(s) {
+    s = s || config.get().server;
     let cmd;
     let args;
     let custom;
@@ -102,9 +102,9 @@ class MCServer extends EventEmitter {
     return { cmd: wrapped.cmd, args: wrapped.args, custom };
   }
 
-  describeCommand() {
-    const s = config.get().server;
-    const { cmd, args, custom } = this.buildCommand();
+  describeCommand(s) {
+    s = s || config.get().server;
+    const { cmd, args, custom } = this.buildCommand(s);
     if (custom) {
       // When taskset-wrapped, args = ['-c', RANGE, 'sh', '-c', <customCommand>].
       if (cmd === 'taskset') return `taskset -c ${args[1]} ${s.customCommand}`;
