@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const crypto = require('crypto');
 const backups = require('../backups');
 const config = require('../config');
 const { requireAuth } = require('../auth');
@@ -14,10 +15,32 @@ router.get('/', (req, res) => {
   }).catch((err) => res.status(500).json({ error: err.message }));
 });
 
+// Backing up tens of GB takes minutes, so it runs as a background job and the
+// client polls /status for progress (same pattern as archive extraction).
+const backupJobs = new Map();
+
 router.post('/create', (req, res) => {
-  backups.create((req.body || {}).label || '')
-    .then((b) => res.json({ ok: true, backup: b }))
-    .catch((err) => res.status(err.status || 500).json({ error: err.message }));
+  const jobId = crypto.randomBytes(8).toString('hex');
+  const job = { status: 'running', phase: 'measuring', files: 0, bytesDone: 0, totalBytes: 0, archiveBytes: 0, name: '', error: '' };
+  backupJobs.set(jobId, job);
+
+  backups.create((req.body || {}).label || '', (p) => Object.assign(job, p))
+    .then((b) => {
+      Object.assign(job, { status: 'done', phase: 'done', name: b.name, archiveBytes: b.size });
+      setTimeout(() => backupJobs.delete(jobId), 5 * 60 * 1000);
+    })
+    .catch((err) => {
+      Object.assign(job, { status: 'error', error: err.message });
+      setTimeout(() => backupJobs.delete(jobId), 5 * 60 * 1000);
+    });
+
+  res.json({ ok: true, jobId });
+});
+
+router.get('/status', (req, res) => {
+  const job = backupJobs.get(String(req.query.id || ''));
+  if (!job) return res.status(404).json({ error: 'Задача бэкапа не найдена (возможно, уже завершена).' });
+  res.json(job);
 });
 
 router.post('/restore', (req, res) => {

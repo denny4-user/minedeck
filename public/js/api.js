@@ -59,6 +59,7 @@ const API = (() => {
     // backups
     backups: () => get('/api/backups'),
     createBackup: (label) => post('/api/backups/create', { label }),
+    backupStatus: (id) => get('/api/backups/status?id=' + encodeURIComponent(id)),
     restoreBackup: (name) => post('/api/backups/restore', { name }),
     deleteBackup: (name) => post('/api/backups/delete', { name }),
     backupDownloadUrl: (name) => '/api/backups/download?name=' + encodeURIComponent(name),

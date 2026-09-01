@@ -1146,10 +1146,52 @@ async function createBackup() {
   $('[data-c]', m.root).onclick = m.close;
   $('[data-ok]', m.root).onclick = async () => {
     const label = $('#bk-label', m.root).value.trim();
-    m.close(); toast('Создаётся бэкап…', 'info');
-    try { await API.createBackup(label); toast('Бэкап создан', 'success'); loadBackups(); }
-    catch (err) { toastErr(err); }
+    m.close();
+    let started;
+    try { started = await API.createBackup(label); }
+    catch (err) { toastErr(err); return; }
+    watchBackupProgress(started.jobId);
   };
+}
+
+// Backups of a big server take minutes — show live progress while tar packs.
+function watchBackupProgress(jobId) {
+  const m = openModal({
+    title: 'Создание бэкапа',
+    body: `<p class="text-sm text-base-content/60 mb-3">Архив создаётся на сервере. Окно можно закрыть — бэкап продолжится в фоне.</p>
+      <progress id="bk-bar" class="progress progress-success w-full"></progress>
+      <div id="bk-text" class="text-xs text-base-content/50 mt-2">Подсчёт объёма данных…</div>`,
+  });
+  const bar = $('#bk-bar', m.root), txt = $('#bk-text', m.root);
+  let done = false;
+  const finish = (fn) => { if (done) return; done = true; clearInterval(poll); m.close(); fn(); };
+  const poll = setInterval(async () => {
+    let s;
+    try { s = await API.backupStatus(jobId); }
+    catch (err) {
+      // 404 = job finished and was pruned from the registry.
+      if (err.status === 404) finish(() => { toast('Бэкап создан', 'success'); loadBackups(); });
+      return;
+    }
+    if (s.status === 'done') {
+      finish(() => { toast(`Бэкап создан (${fmtBytes(s.archiveBytes)})`, 'success'); loadBackups(); });
+      return;
+    }
+    if (s.status === 'error') {
+      finish(() => { toast('Ошибка бэкапа: ' + (s.error || ''), 'error'); loadBackups(); });
+      return;
+    }
+    if (s.phase === 'measuring') { bar.removeAttribute('value'); txt.textContent = 'Подсчёт объёма данных…'; return; }
+    if (s.phase === 'pruning') { bar.value = 100; bar.max = 100; txt.textContent = 'Очистка старых бэкапов…'; return; }
+    if (s.totalBytes > 0) {
+      bar.max = 100;
+      bar.value = Math.min(100, Math.round((s.bytesDone / s.totalBytes) * 100));
+      txt.textContent = `Упаковано ${fmtBytes(s.bytesDone)} из ${fmtBytes(s.totalBytes)} · файлов: ${s.files} · архив ${fmtBytes(s.archiveBytes)}`;
+    } else {
+      bar.removeAttribute('value'); // unknown total — indeterminate bar
+      txt.textContent = `Упаковано файлов: ${s.files} · архив ${fmtBytes(s.archiveBytes)}`;
+    }
+  }, 1000);
 }
 async function restoreBackup(name) {
   if (State.status.state !== 'stopped') { toast('Сначала остановите сервер.', 'error'); return; }
