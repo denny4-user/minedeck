@@ -59,7 +59,13 @@ function normalizeServerPatch(b, cur) {
 router.post('/server', (req, res) => {
   const patch = { server: normalizeServerPatch(req.body || {}, config.get().server) };
   config.update(patch);
-  res.json({ ok: true, server: config.get().server, commandPreview: mcserver.describeCommand() });
+  const commandPreview = mcserver.describeCommand();
+  res.json({
+    ok: true,
+    server: config.get().server,
+    commandPreview,
+    warnings: mcserver.commandWarnings(commandPreview),
+  });
 });
 
 // Dry-run: compute the resulting launch command for hypothetical (unsaved)
@@ -67,7 +73,8 @@ router.post('/server', (req, res) => {
 // the auto-generated command" button in Settings.
 router.post('/server/preview', (req, res) => {
   const hypothetical = normalizeServerPatch(req.body || {}, config.get().server);
-  res.json({ commandPreview: mcserver.describeCommand(hypothetical) });
+  const commandPreview = mcserver.describeCommand(hypothetical);
+  res.json({ commandPreview, warnings: mcserver.commandWarnings(commandPreview) });
 });
 
 router.post('/panel', (req, res) => {

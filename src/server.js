@@ -116,6 +116,8 @@ wss.on('connection', (ws) => {
 
 mcserver.on('output', (entry) => broadcast({ type: 'output', entry }));
 mcserver.on('status', (status) => broadcast({ type: 'status', status }));
+// Unexpected exits surface as a toast, not just a console line the user may miss.
+mcserver.on('crash', (message) => broadcast({ type: 'error', message }));
 
 // Push resource stats to all connected clients every 2 seconds.
 // Disk usage is computed via `df` — cache it so we don't spawn it every tick.

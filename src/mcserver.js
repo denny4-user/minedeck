@@ -9,6 +9,55 @@ const config = require('./config');
 
 const HISTORY_LIMIT = 400;
 
+// A process that dies faster than this counts as "failed to start"; after
+// MAX_FAST_FAILS such deaths in a row we stop auto-restarting instead of
+// respawning a broken server forever.
+const FAST_FAIL_MS = 30000;
+const MAX_FAST_FAILS = 3;
+
+// Parse a JVM size argument ("1024M", "10G", "512k", bare bytes) into MB.
+function parseJvmSizeMB(v) {
+  const m = /^(\d+)([kmgt]?)$/i.exec(String(v).trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  switch ((m[2] || '').toLowerCase()) {
+    case 'k': return n / 1024;
+    case 'm': return n;
+    case 'g': return n * 1024;
+    case 't': return n * 1024 * 1024;
+    default: return n / (1024 * 1024); // no suffix = bytes
+  }
+}
+
+// Sanity-check a launch command and return human-readable warnings. Catches the
+// common footguns of a hand-edited command (e.g. -Xms typed twice instead of
+// -Xmx, which pins the heap and can get the server OOM-killed).
+function commandWarnings(cmdStr) {
+  const str = String(cmdStr || '');
+  const out = [];
+  if (!/(^|\s)-jar(\s|$)/.test(str) && !/\bjava\b/.test(str)) return out;
+
+  const xms = str.match(/-Xms\S+/gi) || [];
+  const xmx = str.match(/-Xmx\S+/gi) || [];
+  if (xms.length > 1) {
+    out.push('В команде дважды указан -Xms — похоже на опечатку вместо -Xmx. JVM возьмёт последнее значение и жёстко зафиксирует heap на нём (память не сможет освобождаться).');
+  }
+  if (xms.length && !xmx.length) {
+    out.push('Не указан -Xmx (максимум heap). JVM подставит своё значение — сервер может занять неожиданно много памяти.');
+  }
+  const sizes = [...xms, ...xmx]
+    .map((f) => parseJvmSizeMB(f.replace(/^-Xm[sx]/i, '')))
+    .filter((n) => n != null && n > 0);
+  if (sizes.length) {
+    const heapMB = Math.max(...sizes);
+    const totalMB = Math.round(os.totalmem() / (1024 * 1024));
+    if (totalMB > 0 && heapMB >= totalMB * 0.8) {
+      out.push(`Heap ~${(heapMB / 1024).toFixed(1)} ГБ занимает почти всю ОЗУ сервера (${(totalMB / 1024).toFixed(1)} ГБ) — процесс может быть убит системой (OOM killer). Оставьте 2–4 ГБ системе.`);
+    }
+  }
+  return out;
+}
+
 // Is `taskset` (util-linux) available for CPU-affinity based core limiting?
 const HAS_TASKSET = (() => {
   try {
@@ -42,6 +91,7 @@ class MCServer extends EventEmitter {
     this._intentionalStop = false;
     this._pendingRestart = false;
     this._stopTimer = null;
+    this._fastFails = 0;
   }
 
   get pid() {
@@ -198,6 +248,7 @@ class MCServer extends EventEmitter {
       this._stopTimer = null;
     }
     const wasIntentional = this._intentionalStop;
+    const uptimeMs = this.startedAt ? Date.now() - this.startedAt : 0;
     this.pushLine(`[MineDeck] Сервер остановлен (code=${code}, signal=${signal || 'none'})`, 'sys');
     this.proc = null;
     this.startedAt = null;
@@ -205,15 +256,41 @@ class MCServer extends EventEmitter {
 
     if (this._pendingRestart) {
       this._pendingRestart = false;
+      this._fastFails = 0;
       setTimeout(() => this._safeStart(), 1500);
       return;
     }
-    const s = config.get().server;
-    if (!wasIntentional && s.autoRestart) {
+    if (wasIntentional) {
+      this._intentionalStop = false;
+      this._fastFails = 0;
+      return;
+    }
+
+    // Crashed on its own. Count rapid failures so a server that simply cannot
+    // start (bad flags, not enough RAM, OOM-kill) isn't respawned forever.
+    const crashedFast = uptimeMs < FAST_FAIL_MS;
+    this._fastFails = crashedFast ? this._fastFails + 1 : 0;
+    const reason = signal === 'SIGKILL'
+      ? 'процесс был убит (SIGKILL) — чаще всего это нехватка памяти (OOM killer). Проверьте -Xmx: heap не должен занимать почти всю ОЗУ.'
+      : `код выхода ${code}${signal ? `, сигнал ${signal}` : ''}.`;
+
+    if (crashedFast && this._fastFails >= MAX_FAST_FAILS) {
+      const msg = `Сервер падает сразу после запуска ${this._fastFails} раза подряд — авто-перезапуск остановлен. ${reason}`;
+      this.pushLine(`[MineDeck] ${msg}`, 'err');
+      this.emit('crash', msg);
+      this._fastFails = 0;
+      return;
+    }
+    if (crashedFast) {
+      const msg = `Сервер завершился через ${Math.round(uptimeMs / 1000)}с после запуска: ${reason}`;
+      this.pushLine(`[MineDeck] ${msg}`, 'err');
+      this.emit('crash', msg);
+    }
+
+    if (config.get().server.autoRestart) {
       this.pushLine('[MineDeck] Авто-перезапуск включён, перезапуск через 5с...', 'sys');
       setTimeout(() => this._safeStart(), 5000);
     }
-    this._intentionalStop = false;
   }
 
   _safeStart() {
@@ -278,3 +355,5 @@ class MCServer extends EventEmitter {
 module.exports = new MCServer();
 module.exports.cpuAffinityWrap = cpuAffinityWrap;
 module.exports.HAS_TASKSET = HAS_TASKSET;
+module.exports.commandWarnings = commandWarnings;
+module.exports.parseJvmSizeMB = parseJvmSizeMB;

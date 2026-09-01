@@ -1501,6 +1501,8 @@ async function renderServerSettings(body) {
     // the current — possibly unsaved — form field values).
     let previewOverridden = !!(s.customCommand && s.customCommand.trim());
     const previewEl = $('#s-preview');
+    // A quick tab switch can leave this render stale (its DOM already replaced).
+    if (!previewEl) return;
     previewEl.addEventListener('input', () => { previewOverridden = true; });
 
     const currentFormFields = () => ({
@@ -1525,6 +1527,9 @@ async function renderServerSettings(body) {
         const r = await API.saveServerSettings(payload);
         previewEl.value = r.commandPreview;
         toast('Настройки сервера сохранены', 'success');
+        // Non-blocking sanity warnings about the resulting launch command
+        // (e.g. -Xms typed twice instead of -Xmx, heap larger than the RAM).
+        (r.warnings || []).forEach((w, i) => setTimeout(() => toast(w, 'error'), 400 * (i + 1)));
       } catch (err) { toastErr(err); }
     };
     const eulaBtn = $('#s-eula');
