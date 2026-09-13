@@ -1746,6 +1746,10 @@ async function renderPanelSettings(body) {
         <div class="text-xs text-base-content/45 mt-3">Обновление тянет последнюю версию из GitHub-репозитория и перезапускает панель. Настройки, бэкапы и вход сохраняются.</div>
       </div></div>
       <div class="${CARD} mt-4"><div class="card-body p-5">
+        ${sectionTitle('MCP — управление через ИИ', '<span class="badge badge-ghost" id="mcp-badge">…</span>')}
+        <div id="mcp-body" class="text-sm text-base-content/60">Загрузка…</div>
+      </div></div>
+      <div class="${CARD} mt-4"><div class="card-body p-5">
         ${sectionTitle('О системе')}
         <table class="table table-sm">
           ${infoRow('Версия панели', `<span class="font-mono">${esc(sys.panelVersion)}</span>`)}
@@ -1767,7 +1771,125 @@ async function renderPanelSettings(body) {
       catch (err) { toastErr(err); }
     };
     initUpdateCard();
+    initMcpCard();
   } catch (err) { toastErr(err); }
+}
+
+// ---- MCP (Model Context Protocol) ----------------------------------------
+async function initMcpCard() {
+  const body = $('#mcp-body');
+  const badge = $('#mcp-badge');
+  if (!body) return;
+  let st;
+  try { st = await API.mcpStatus(); }
+  catch (err) { body.textContent = 'Не удалось получить статус MCP: ' + err.message; return; }
+  const url = `${location.protocol}//${location.host}/mcp`;
+  const keep = (r) => { const { token, ok, ...rest } = r; st = { ...st, ...rest }; };
+
+  const render = () => {
+    if (!document.body.contains(body)) return;
+    badge.className = 'badge ' + (st.enabled ? (st.readOnly ? 'badge-info' : 'badge-success') : 'badge-ghost');
+    badge.textContent = st.enabled ? (st.readOnly ? 'только чтение' : 'включён') : 'выключен';
+    const c = st.readOnly ? st.counts.readOnly : st.counts.full;
+    body.innerHTML = `
+      <p class="leading-relaxed mb-3">Model Context Protocol даёт ИИ-клиентам (Claude Code и другим) доступ к панели: статус и консоль, запуск и остановка, файлы, бэкапы, таймеры, server.properties, параметры запуска, фаервол и базы данных. Сейчас доступно: инструментов — <b>${c.tools}</b>, ресурсов — ${c.resources}, промптов — ${c.prompts}.</p>
+      <div class="rounded-box border border-base-300 px-4 divide-y divide-base-300/50">
+        ${toggleRow('Включить MCP', esc(url), 'mcp-enabled', st.enabled)}
+        ${toggleRow('Только чтение', `просмотр без изменений · ${st.counts.readOnly.tools} инструментов`, 'mcp-ro', st.readOnly)}
+      </div>
+      <div class="flex items-center gap-2 flex-wrap mt-3">
+        <span class="text-xs text-base-content/50">${st.hasToken ? `Токен выпущен ${fmtDate(st.tokenCreatedAt)}` : 'Токен не выпущен — без него подключиться нельзя'}</span>
+        <div class="flex-1"></div>
+        <button class="btn btn-sm gap-1.5" id="mcp-token">${icon('key', 'w-4 h-4')} ${st.hasToken ? 'Перевыпустить токен' : 'Выпустить токен'}</button>
+        ${st.hasToken ? '<button class="btn btn-sm btn-ghost text-error" id="mcp-revoke">Отозвать</button>' : ''}
+      </div>
+      <div class="mt-3 rounded-lg bg-warning/10 border border-warning/30 text-xs p-3 leading-relaxed text-base-content/80">
+        <b class="text-warning">Безопасность.</b> В полном режиме токен даёт ИИ практически полный контроль над машиной (панель работает от root) — выдавайте его только доверенным клиентам. Чат игроков попадает в логи консоли и может содержать попытки «уговорить» ИИ, поэтому для наблюдения лучше режим «Только чтение».${location.protocol === 'http:' ? '<br>Панель открыта по HTTP — токен передаётся без шифрования. Для доступа через интернет поставьте HTTPS (nginx + Let\'s Encrypt) или ограничьте порт панели своим IP в разделе «Фаервол».' : ''}
+      </div>`;
+    wire();
+  };
+
+  const wire = () => {
+    $('#mcp-enabled').onchange = async (e) => {
+      const on = e.target.checked;
+      try {
+        if (on && !st.hasToken) {
+          const t = await API.mcpToken();
+          keep(t);
+          showMcpToken(t.token, url);
+        }
+        keep(await API.mcpConfig({ enabled: on }));
+        toast(on ? 'MCP включён' : 'MCP выключен', 'success');
+      } catch (err) { toastErr(err); }
+      render();
+    };
+    $('#mcp-ro').onchange = async (e) => {
+      try {
+        keep(await API.mcpConfig({ readOnly: e.target.checked }));
+        toast(e.target.checked ? 'MCP: только чтение' : 'MCP: полный доступ', 'success');
+      } catch (err) { toastErr(err); }
+      render();
+    };
+    $('#mcp-token').onclick = async () => {
+      if (st.hasToken && !(await confirmDialog('Выпустить новый токен? Прежний сразу перестанет работать — подключённых клиентов придётся настроить заново.', { okText: 'Перевыпустить' }))) return;
+      try {
+        const t = await API.mcpToken();
+        keep(t);
+        render();
+        showMcpToken(t.token, url);
+      } catch (err) { toastErr(err); }
+    };
+    const revoke = $('#mcp-revoke');
+    if (revoke) revoke.onclick = async () => {
+      if (!(await confirmDialog('Отозвать токен? Все подключённые ИИ-клиенты потеряют доступ.', { danger: true, okText: 'Отозвать' }))) return;
+      try {
+        keep(await API.mcpRevoke());
+        toast('Токен отозван', 'success');
+        render();
+      } catch (err) { toastErr(err); }
+    };
+  };
+
+  render();
+}
+
+function showMcpToken(token, url) {
+  const cli = `claude mcp add --transport http minedeck ${url} --header "Authorization: Bearer ${token}"`;
+  const mcpJson = JSON.stringify({ mcpServers: { minedeck: { type: 'http', url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2);
+  const m = openModal({
+    title: 'Токен MCP',
+    wide: true,
+    body: `
+      <div class="rounded-lg bg-warning/10 border border-warning/30 text-sm p-3 mb-4">Скопируйте токен сейчас: панель хранит только его хэш и <b>больше его не покажет</b>. Потеряли — просто перевыпустите.</div>
+      ${copyBlock('Токен', token, 'mcp-copy-token')}
+      ${copyBlock('Claude Code — команда в терминале', cli, 'mcp-copy-cli')}
+      ${copyBlock('Файл .mcp.json в папке проекта — при первом запуске claude в этой папке подтвердите сервер', mcpJson, 'mcp-copy-json')}`,
+    footer: '<button class="btn btn-primary" data-close2>Готово</button>',
+  });
+  $('[data-close2]', m.root).onclick = m.close;
+  $$('[data-copy]', m.root).forEach((b) => { b.onclick = () => copyText($('#' + b.dataset.copy, m.root)); });
+}
+
+function copyBlock(label, value, id) {
+  const rows = Math.max(1, Math.min(10, value.split('\n').length + Math.floor(value.length / 90)));
+  return `<div class="mb-3">
+    <div class="flex items-center justify-between mb-1">
+      <span class="text-xs font-medium text-base-content/70">${esc(label)}</span>
+      <button type="button" class="btn btn-ghost btn-xs" data-copy="${id}">Копировать</button>
+    </div>
+    <textarea id="${id}" readonly rows="${rows}" spellcheck="false" class="code-preview-input">${esc(value)}</textarea>
+  </div>`;
+}
+
+// navigator.clipboard only exists in secure contexts; a panel opened over plain
+// HTTP by IP isn't one, so fall back to execCommand and finally to a selection.
+async function copyText(el) {
+  if (!el) return;
+  try { await navigator.clipboard.writeText(el.value); toast('Скопировано', 'success'); return; } catch (_) {}
+  el.focus();
+  el.select();
+  try { if (document.execCommand('copy')) { toast('Скопировано', 'success'); return; } } catch (_) {}
+  toast('Текст выделен — нажмите Ctrl+C (⌘C)', 'info');
 }
 
 async function initUpdateCard() {

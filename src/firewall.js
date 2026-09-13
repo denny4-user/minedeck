@@ -159,4 +159,20 @@ async function delRule(port, proto, action, from) {
   return status();
 }
 
-module.exports = { status, enable, disable, allow, deny, delRule, parseSources, validateAddress };
+// `ufw status` prints no rules while the firewall is inactive, so read the
+// configured rule set from `ufw show added` instead.
+async function addedRules() {
+  const out = await run(['show', 'added']);
+  return out.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('ufw '));
+}
+
+// Does any configured rule (lines from addedRules) allow inbound traffic to `port`?
+function allowsPort(ruleLines, port) {
+  const p = String(port);
+  const plain = new RegExp(`(^|\\s)${p}(/tcp)?(\\s|$)`);
+  const long = new RegExp(`\\bport ${p}\\b`);
+  return ruleLines.some((l) => /\b(allow|limit)\b/.test(l)
+    && (plain.test(l) || long.test(l) || (p === '22' && /\bOpenSSH\b/i.test(l))));
+}
+
+module.exports = { status, enable, disable, allow, deny, delRule, parseSources, validateAddress, addedRules, allowsPort };

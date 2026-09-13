@@ -3,6 +3,7 @@
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
+const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const config = require('./config');
 const mcserver = require('./mcserver');
@@ -226,6 +227,33 @@ function restore(name) {
   });
 }
 
+// Background create jobs, shared by the web API and MCP. Finished jobs are kept
+// for 5 minutes so a late poll still sees the result.
+const jobs = new Map();
+
+function startCreateJob(label) {
+  const jobId = crypto.randomBytes(8).toString('hex');
+  const job = { status: 'running', phase: 'measuring', files: 0, bytesDone: 0, totalBytes: 0, archiveBytes: 0, name: '', error: '', startedAt: Date.now() };
+  jobs.set(jobId, job);
+  const expire = () => setTimeout(() => jobs.delete(jobId), 5 * 60 * 1000).unref();
+
+  create(label || '', (p) => Object.assign(job, p))
+    .then((b) => {
+      Object.assign(job, { status: 'done', phase: 'done', name: b.name, archiveBytes: b.size });
+      expire();
+    })
+    .catch((err) => {
+      Object.assign(job, { status: 'error', error: err.message });
+      expire();
+    });
+
+  return { jobId, job };
+}
+
+function jobStatus(jobId) {
+  return jobs.get(String(jobId || '')) || null;
+}
+
 module.exports = {
   backupsDir,
   list,
@@ -234,4 +262,6 @@ module.exports = {
   remove,
   restore,
   pathFor,
+  startCreateJob,
+  jobStatus,
 };

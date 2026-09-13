@@ -86,6 +86,11 @@ const API = (() => {
     dbQuery: (name, sql) => post('/api/databases/query', { name, sql }),
     // update
     version: () => get('/api/update/version'),
+    // MCP
+    mcpStatus: () => get('/api/mcp'),
+    mcpConfig: (c) => post('/api/mcp/config', c),
+    mcpToken: () => post('/api/mcp/token'),
+    mcpRevoke: () => post('/api/mcp/token/revoke'),
     checkUpdate: () => post('/api/update/check'),
     applyUpdate: () => post('/api/update/apply'),
     // firewall

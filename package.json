@@ -1,6 +1,6 @@
 {
   "name": "minedeck",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "MineDeck — a lightweight, single-server web control panel for a Minecraft server. Console, file manager, backups, timers, RAM/port/firewall settings.",
   "main": "src/server.js",
   "type": "commonjs",
@@ -15,12 +15,14 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "bcryptjs": "^2.4.3",
     "express": "^4.19.2",
     "express-session": "^1.18.0",
     "multer": "^2.0.1",
     "mysql2": "^3.22.5",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "zod": "^4.6.4"
   },
   "devDependencies": {
     "daisyui": "^4.12.14",

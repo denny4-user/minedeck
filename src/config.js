@@ -77,6 +77,12 @@ function defaultConfig() {
       },
       created: [],
     },
+    mcp: {
+      enabled: false,
+      readOnly: false,
+      tokenHash: null,
+      tokenCreatedAt: null,
+    },
   };
 }
 

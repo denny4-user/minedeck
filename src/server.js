@@ -49,6 +49,11 @@ app.use('/api/firewall', require('./routes/firewall'));
 app.use('/api/system', require('./routes/system'));
 app.use('/api/update', require('./routes/update'));
 app.use('/api/databases', require('./routes/databases'));
+app.use('/api/mcp', require('./routes/mcp'));
+
+// MCP endpoint for AI clients (Bearer token, disabled by default). Mounted before
+// the SPA fallback so GET /mcp isn't answered with index.html.
+require('./mcp').mount(app);
 
 app.get('/api/health', (req, res) => res.json({ ok: true, version: require('../package.json').version }));
 

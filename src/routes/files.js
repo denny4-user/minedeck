@@ -4,10 +4,10 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const crypto = require('crypto');
-const { spawn, execFileSync } = require('child_process');
+const { spawn } = require('child_process');
 const multer = require('multer');
 const files = require('../files');
+const archives = require('../archives');
 const { requireAuth } = require('../auth');
 
 const router = express.Router();
@@ -110,111 +110,25 @@ router.get('/download', async (req, res) => {
 
 // Archive selected entries (direct children of `dir`) into a .tar.gz in `dir`.
 router.post('/archive', (req, res) => {
-  try {
-    const { dir, items, name } = req.body || {};
-    const dirAbs = files.resolveSafe(dir || '');
-    if (!fs.existsSync(dirAbs) || !fs.statSync(dirAbs).isDirectory()) {
-      return res.status(400).json({ error: 'Целевая папка не найдена.' });
-    }
-    if (!Array.isArray(items) || !items.length) {
-      return res.status(400).json({ error: 'Не выбраны файлы для архивации.' });
-    }
-    const names = [];
-    for (const it of items) {
-      const base = String(it).split('/').pop();
-      if (!base || base === '.' || base === '..') return res.status(400).json({ error: 'Некорректный элемент.' });
-      files.resolveSafe(path.join(dir || '', base)); // stay inside base dir
-      if (!fs.existsSync(path.join(dirAbs, base))) return res.status(400).json({ error: `Не найден: ${base}` });
-      names.push(base);
-    }
-    const p2 = (n) => String(n).padStart(2, '0');
-    const d = new Date();
-    const ts = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}-${p2(d.getMinutes())}-${p2(d.getSeconds())}`;
-    const safe = (name ? String(name).replace(/[^a-zA-Z0-9_\-.]/g, '') : '') || ('archive_' + ts);
-    const fileName = safe.endsWith('.tar.gz') ? safe : safe + '.tar.gz';
-    const outAbs = files.resolveSafe(path.join(dir || '', fileName));
-    const proc = spawn('tar', ['-czf', outAbs, '-C', dirAbs, ...names]);
-    let stderr = '';
-    proc.stderr.on('data', (d0) => (stderr += d0.toString()));
-    proc.on('error', (err) => { if (!res.headersSent) res.status(500).json({ error: err.message }); });
-    proc.on('exit', (code) => {
-      if (res.headersSent) return;
-      if (code === 0) res.json({ ok: true, name: fileName });
-      else res.status(500).json({ error: 'tar: ' + stderr.slice(0, 300) });
-    });
-  } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
-  }
+  const { dir, items, name } = req.body || {};
+  archives.archive(dir, items, name)
+    .then((r) => res.json({ ok: true, name: r.name }))
+    .catch((err) => res.status(err.status || 500).json({ error: err.message }));
 });
 
 // Extraction runs as a background job (large archives take minutes) so the HTTP
 // request doesn't hang/time out. The client polls /extract-status for progress.
-const extractJobs = new Map(); // jobId -> { status, error, extracted, total, name, startedAt, finishedAt }
-
 router.post('/extract', async (req, res) => {
   try {
-    const info = await files.statInfo((req.body || {}).path);
-    if (info.isDir) return res.status(400).json({ error: 'Это папка, а не архив.' });
-    const destDir = path.dirname(info.abs);
-    const lower = info.name.toLowerCase();
-    let cmd;
-    let args;
-    let kind;
-    // -v adds a per-file line to stdout/stderr we count for progress.
-    if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) { cmd = 'tar'; args = ['-xzvf', info.abs, '-C', destDir]; kind = 'tar'; }
-    else if (lower.endsWith('.tar.bz2') || lower.endsWith('.tbz2')) { cmd = 'tar'; args = ['-xjvf', info.abs, '-C', destDir]; kind = 'tar'; }
-    else if (lower.endsWith('.tar.xz') || lower.endsWith('.txz')) { cmd = 'tar'; args = ['-xJvf', info.abs, '-C', destDir]; kind = 'tar'; }
-    else if (lower.endsWith('.tar')) { cmd = 'tar'; args = ['-xvf', info.abs, '-C', destDir]; kind = 'tar'; }
-    else if (lower.endsWith('.zip')) { cmd = 'unzip'; args = ['-o', info.abs, '-d', destDir]; kind = 'zip'; }
-    else if (lower.endsWith('.gz')) { cmd = 'gunzip'; args = ['-kf', info.abs]; kind = 'gz'; }
-    else return res.status(400).json({ error: 'Неподдерживаемый формат архива.' });
-
-    const jobId = crypto.randomBytes(8).toString('hex');
-    const job = { status: 'running', error: '', extracted: 0, total: 0, name: info.name, startedAt: Date.now(), finishedAt: 0 };
-    extractJobs.set(jobId, job);
-
-    // Fast entry count for zip (reads the central directory, not the data).
-    if (kind === 'zip') {
-      try {
-        const out = execFileSync('zipinfo', ['-t', info.abs], { timeout: 20000, maxBuffer: 1024 * 1024 }).toString();
-        const m = out.match(/(\d+)\s+files?/i);
-        if (m) job.total = parseInt(m[1], 10);
-      } catch (_) { /* no total -> UI shows a running count */ }
-    }
-
-    const proc = spawn(cmd, args);
-    let stderr = '';
-    const countLine = (line) => {
-      if (kind === 'zip') { if (/^\s*(inflating|extracting|creating|linking):/.test(line)) job.extracted++; }
-      else if (kind === 'tar') { if (line.trim()) job.extracted++; }
-    };
-    let outBuf = '';
-    let errBuf = '';
-    proc.stdout.on('data', (d0) => { outBuf += d0.toString(); let i; while ((i = outBuf.indexOf('\n')) >= 0) { countLine(outBuf.slice(0, i)); outBuf = outBuf.slice(i + 1); } });
-    proc.stderr.on('data', (d0) => {
-      const s = d0.toString(); stderr += s;
-      if (kind === 'tar') { errBuf += s; let i; while ((i = errBuf.indexOf('\n')) >= 0) { countLine(errBuf.slice(0, i)); errBuf = errBuf.slice(i + 1); } }
-    });
-    proc.on('error', (err) => {
-      job.status = 'error'; job.finishedAt = Date.now();
-      job.error = err.code === 'ENOENT' ? `Утилита «${cmd}» не установлена на сервере (apt install ${cmd}).` : err.message;
-    });
-    proc.on('exit', (code) => {
-      if (job.status === 'error') return;
-      if (code === 0) { job.status = 'done'; }
-      else { job.status = 'error'; job.error = `${cmd} завершился с кодом ${code}: ${(stderr || '').trim().slice(-300)}`; }
-      job.finishedAt = Date.now();
-      setTimeout(() => extractJobs.delete(jobId), 5 * 60 * 1000);
-    });
-
-    res.json({ ok: true, jobId, total: job.total });
+    const { jobId, total } = await archives.startExtract((req.body || {}).path);
+    res.json({ ok: true, jobId, total });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
 
 router.get('/extract-status', (req, res) => {
-  const job = extractJobs.get(String(req.query.id || ''));
+  const job = archives.extractStatus(req.query.id);
   if (!job) return res.status(404).json({ error: 'Задача распаковки не найдена (возможно, уже завершена).' });
   res.json({ status: job.status, error: job.error, extracted: job.extracted, total: job.total, name: job.name });
 });
